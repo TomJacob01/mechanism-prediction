@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# Caches / tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+
+# Project outputs
+results/
+checkpoints/
+*.pt
+*.ckpt
+runs/
+wandb/
+mlruns/
+
+# Datasets (root-level only — do NOT match src/mech_uspto/data/ which is source code)
+/data/
+!tests/fixtures/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+.python-version
