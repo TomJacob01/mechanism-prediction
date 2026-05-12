@@ -1,8 +1,11 @@
-# Sync code to / results from the cluster GPU cluster via rsync (over SSH).
+# Sync code to / results from a remote GPU cluster via rsync (over SSH).
 #
-# Uses WSL's rsync — Windows doesn't ship rsync natively, but you have WSL
-# Ubuntu installed with /usr/bin/rsync. The wrapper translates Windows paths
-# to /mnt/c/... so WSL rsync sees the same files.
+# Uses WSL's rsync — Windows doesn't ship rsync natively. The wrapper
+# translates Windows paths to /mnt/c/... so WSL rsync sees the same files.
+#
+# Connection details (user / host / remote path) live in a *gitignored*
+# config file: scripts/sync.config.ps1. Copy sync.config.example.ps1 to
+# sync.config.ps1 and fill in your values.
 #
 # Usage:
 #   .\scripts\sync.ps1 push                # local → cluster (code only)
@@ -32,10 +35,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Cluster connection — edit if these change.
-$RemoteUser = '<REDACTED-USER>'
-$RemoteHost = '<REDACTED-HOST>'
-$RemoteRoot = '/home/<REDACTED-USER>/mechanism-prediction'
+# Cluster connection — loaded from a gitignored local config file so the
+# host/user never lands on GitHub.
+$ConfigPath = Join-Path $PSScriptRoot 'sync.config.ps1'
+if (-not (Test-Path $ConfigPath)) {
+    throw "Missing $ConfigPath. Copy scripts/sync.config.example.ps1 to scripts/sync.config.ps1 and fill in RemoteUser / RemoteHost / RemoteRoot."
+}
+. $ConfigPath
+foreach ($v in 'RemoteUser','RemoteHost','RemoteRoot') {
+    if (-not (Get-Variable -Name $v -Scope Script -ErrorAction SilentlyContinue)) {
+        throw "sync.config.ps1 must define `$$v"
+    }
+}
 
 # Convert the local repo root to a WSL path: C:\Users\... → /mnt/c/Users/...
 $LocalWin  = (Get-Location).Path

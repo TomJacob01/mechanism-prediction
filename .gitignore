@@ -43,3 +43,8 @@ mlruns/
 *.swp
 .DS_Store
 .python-version
+
+# Private (machine-specific / sensitive — never publish)
+CLUSTER_SETUP.md
+legacy/
+scripts/sync.config.ps1

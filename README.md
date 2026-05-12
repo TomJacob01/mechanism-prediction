@@ -180,8 +180,9 @@ learn intermediate states.
 
 ## Cluster deployment
 
-See `DEPLOYMENT.md` for SLURM templates, env setup, and monitoring tips on
-the cluster (8× A100 partition).
+The training script is GPU-agnostic and runs on any single-node CUDA setup
+(e.g. an 8× A100 partition). For SLURM submission, mirror the data layout
+in `DATA.md` and point `MECH_USPTO_DATA` at it.
 
 ---
 

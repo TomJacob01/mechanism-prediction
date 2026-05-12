@@ -325,9 +325,9 @@ graduates to "tool other people use."
 
 ## Cross-cutting non-functional debt
 
-- **Hardcoded paths.** `DEFAULT_DATA_DIR = "./data/mech-USPTO-31k"`
-  is a cluster-specific guess. Drop the fallback and require either
-  `MECH_USPTO_DATA` or `--data-dir`.
+- **Hardcoded paths.** `DEFAULT_DATA_DIR = "./data/mech-USPTO-31k"` is a
+  best-effort fallback. Consider dropping it and requiring either
+  `MECH_USPTO_DATA` or `--data-dir` to be set explicitly.
 - **Hardcoded performance numbers in README.** The "Final F1 ~0.85" table
   is from the POC notebook — re-validate after the first real test-set run.
 - **No `version.py`.** `mech_uspto.__version__` doesn't exist yet; users
