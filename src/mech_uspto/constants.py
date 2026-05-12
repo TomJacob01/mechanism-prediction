@@ -26,10 +26,15 @@ ALLOWED_BOND_TYPES: list[float] = [1.0, 2.0, 3.0, 4.0]
 
 # Resulting feature widths (kept here so downstream code does not hardcode them).
 NODE_FEATURE_DIM: int = (
-    len(ALLOWED_ELEMENTS) + 1            # element one-hot + unknown
-    + 5                                   # degree, charge, aromatic, num_hs, in_ring
-    + len(ALLOWED_HYBRIDIZATIONS) + 1     # hybridization one-hot + unknown
-    + len(ALLOWED_CHIRAL) + 1             # chirality one-hot + unknown
+    len(ALLOWED_ELEMENTS)
+    + 1  # element one-hot + unknown
+    + 5  # degree, charge, aromatic, num_hs, in_ring
+    + len(ALLOWED_HYBRIDIZATIONS)
+    + 1  # hybridization one-hot + unknown
+    + len(ALLOWED_CHIRAL)
+    + 1  # chirality one-hot + unknown
 )  # = 25
 
-EDGE_FEATURE_DIM: int = len(ALLOWED_BOND_TYPES) + 1 + 1  # bond-type one-hot + unknown + in_ring  # = 6
+EDGE_FEATURE_DIM: int = (
+    len(ALLOWED_BOND_TYPES) + 1 + 1
+)  # bond-type one-hot + unknown + in_ring  # = 6

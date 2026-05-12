@@ -1,7 +1,5 @@
 """Metrics for delta-matrix prediction."""
 
-from typing import Dict, List, Tuple
-
 import torch
 
 
@@ -48,7 +46,7 @@ def _metrics_for_sample(
     mol_logits: torch.Tensor,
     mol_targets: torch.Tensor,
     k: int,
-) -> Tuple[int, int, int, int, int, torch.Tensor, torch.Tensor]:
+) -> tuple[int, int, int, int, int, torch.Tensor, torch.Tensor]:
     """Per-sample (tp, fp, fn, topk_hits, total_rxns, scores, targets) over upper-triangle pairs.
 
     ``scores`` and ``targets`` are returned so the caller can pool them across
@@ -97,15 +95,15 @@ class MetricsComputer:
         targets: torch.Tensor,
         mask: torch.Tensor,
         k: int = 3,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Reaction-center metrics over the upper-triangle of each batch sample."""
         B, N, _, _ = logits.shape
         mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
         triu_indices = torch.triu_indices(N, N, offset=1, device=logits.device)
 
         tp, fp, fn, topk_hits, total_rxns = 0, 0, 0, 0, 0
-        all_scores: List[torch.Tensor] = []
-        all_targets: List[torch.Tensor] = []
+        all_scores: list[torch.Tensor] = []
+        all_targets: list[torch.Tensor] = []
 
         for b in range(B):
             m = mask_2d[b]

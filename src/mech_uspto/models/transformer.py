@@ -1,7 +1,5 @@
 """Reaction transformer encoder + delta head (adapted from PMechDB POC)."""
 
-from typing import Tuple
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -47,9 +45,7 @@ class ReactionTransformer(nn.Module):
             )
             self.norms.append(nn.LayerNorm(hidden_dim))
 
-        self.mlp = DeltaMLP(
-            hidden_dim=hidden_dim, num_classes=num_classes, dropout=dropout
-        )
+        self.mlp = DeltaMLP(hidden_dim=hidden_dim, num_classes=num_classes, dropout=dropout)
 
     def encode(
         self,
@@ -57,7 +53,7 @@ class ReactionTransformer(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         batch: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return (dense node embeddings, valid-position mask)."""
         h = self.node_embedding(x)
         e = self.edge_embedding(edge_attr)
@@ -77,7 +73,7 @@ class ReactionTransformer(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         batch: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return (logits of shape (B, N, N, num_classes), node mask)."""
         h_dense, mask = self.encode(x, edge_index, edge_attr, batch)
         logits = self.mlp(h_dense)

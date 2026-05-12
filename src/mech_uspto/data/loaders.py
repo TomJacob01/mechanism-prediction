@@ -1,7 +1,7 @@
 """Collation function and high-level dataloader factory."""
 
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import torch
@@ -13,7 +13,7 @@ from mech_uspto.data.dataset import MechUSPTODataset
 from mech_uspto.data.parser import MechUSPTOParser
 
 
-def collate_fn_with_spectators(data_list: List[Optional[Data]]) -> Optional[Batch]:
+def collate_fn_with_spectators(data_list: list[Optional[Data]]) -> Optional[Batch]:
     """Collate a list of ``Data`` items, padding Δ matrices and spectator masks.
 
     Returns ``None`` if all inputs are ``None`` (drop-empty-batch behaviour).
@@ -25,8 +25,8 @@ def collate_fn_with_spectators(data_list: List[Optional[Data]]) -> Optional[Batc
     max_nodes = max(d.num_nodes for d in data_list)
     has_spectators = hasattr(data_list[0], "spectator_mask")
 
-    y_padded: List[torch.Tensor] = []
-    spectator_padded: List[torch.Tensor] = []
+    y_padded: list[torch.Tensor] = []
+    spectator_padded: list[torch.Tensor] = []
 
     for d in data_list:
         pad_size = max_nodes - d.num_nodes
@@ -57,11 +57,11 @@ def create_dataloaders(
     json_dir: str,
     task_mode: str = "stepwise",
     batch_size: int = 16,
-    train_val_test_split: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+    train_val_test_split: tuple[float, float, float] = (0.7, 0.15, 0.15),
     num_workers: int = 0,
     seed: int = 42,
     compute_spectators: bool = True,
-) -> Dict[str, DataLoader]:
+) -> dict[str, DataLoader]:
     """Parse ``json_dir``, build datasets, return train/val/test DataLoaders."""
     random.seed(seed)
     np.random.seed(seed)
@@ -80,9 +80,7 @@ def create_dataloaders(
     test_reactions = reactions[n_train + n_val :]
 
     print(
-        f"   Train: {len(train_reactions)}, "
-        f"Val: {len(val_reactions)}, "
-        f"Test: {len(test_reactions)}"
+        f"   Train: {len(train_reactions)}, Val: {len(val_reactions)}, Test: {len(test_reactions)}"
     )
 
     print(f"🔨 Building '{task_mode}' mode datasets...")

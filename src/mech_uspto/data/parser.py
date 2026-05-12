@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from typing import List
 
 from tqdm.auto import tqdm
 
@@ -60,12 +59,12 @@ class MechUSPTOParser:
         )
 
     @staticmethod
-    def parse_batch(json_dir: str) -> List[MultiStepReaction]:
+    def parse_batch(json_dir: str) -> list[MultiStepReaction]:
         """Parse every ``*.json`` file in ``json_dir``.
 
         Files that fail to parse are logged and skipped.
         """
-        reactions: List[MultiStepReaction] = []
+        reactions: list[MultiStepReaction] = []
         json_files = sorted(Path(json_dir).glob("*.json"))
 
         for json_file in tqdm(json_files, desc="Parsing mech-USPTO-31k"):

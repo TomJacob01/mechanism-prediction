@@ -59,9 +59,9 @@ def fail(msg: str) -> None:
 def check_environment() -> bool:
     print("\n[1/8] Environment")
     try:
+        import rdkit  # noqa: F401
         import torch
         import torch_geometric  # noqa: F401
-        import rdkit  # noqa: F401
     except ImportError as e:
         fail(f"Missing dependency: {e}")
         return False
@@ -271,8 +271,9 @@ def main() -> int:
     parser.add_argument("--sample-size", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--quick", action="store_true",
-                        help="Skip the mini-training step (steps 1-7 only).")
+    parser.add_argument(
+        "--quick", action="store_true", help="Skip the mini-training step (steps 1-7 only)."
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)

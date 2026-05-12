@@ -17,9 +17,7 @@ from mech_uspto.training.engine import TrainingEngine
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Train ReactionTransformer on mech-USPTO-31k"
-    )
+    parser = argparse.ArgumentParser(description="Train ReactionTransformer on mech-USPTO-31k")
     parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR)
     parser.add_argument(
         "--task-mode",

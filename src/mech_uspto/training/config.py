@@ -3,13 +3,11 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
-DEFAULT_DATA_DIR = os.environ.get(
-    "MECH_USPTO_DATA", "./data/mech-USPTO-31k"
-)
+DEFAULT_DATA_DIR = os.environ.get("MECH_USPTO_DATA", "./data/mech-USPTO-31k")
 
 
 @dataclass
@@ -27,7 +25,7 @@ class Config:
 
     # Dataset
     task_mode: str = "stepwise"  # or "end_to_end"
-    train_val_test_split: Tuple[float, float, float] = (0.7, 0.15, 0.15)
+    train_val_test_split: tuple[float, float, float] = (0.7, 0.15, 0.15)
     batch_size: int = 32
     num_workers: int = 4
 

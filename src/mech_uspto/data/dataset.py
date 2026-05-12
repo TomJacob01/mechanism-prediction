@@ -1,7 +1,5 @@
 """Dual-mode dataset over mech-USPTO-31k reactions."""
 
-from typing import List
-
 import numpy as np
 import torch
 from torch.utils.data import Dataset
@@ -28,22 +26,24 @@ class MechUSPTODataset(Dataset):
 
     def __init__(
         self,
-        reactions: List[MultiStepReaction],
+        reactions: list[MultiStepReaction],
         task_mode: str = "stepwise",
         add_hs: bool = True,
         compute_spectators: bool = True,
         max_retries: int = 3,
     ):
         if task_mode not in VALID_TASK_MODES:
-            raise ValueError(f"Unknown task_mode: {task_mode!r} (expected one of {VALID_TASK_MODES})")
+            raise ValueError(
+                f"Unknown task_mode: {task_mode!r} (expected one of {VALID_TASK_MODES})"
+            )
 
         self.task_mode = task_mode
         self.add_hs = add_hs
         self.compute_spectators = compute_spectators
         self.max_retries = max_retries
 
-        self.data_points: List[Data] = []
-        self.spectator_ratios: List[float] = []
+        self.data_points: list[Data] = []
+        self.spectator_ratios: list[float] = []
 
         if task_mode == "stepwise":
             self._build_stepwise_dataset(reactions)
@@ -55,16 +55,14 @@ class MechUSPTODataset(Dataset):
             avg_spectator = float(np.mean(self.spectator_ratios))
             print(f"   Average spectator ratio: {avg_spectator:.2%}")
 
-    def _build_stepwise_dataset(self, reactions: List[MultiStepReaction]) -> None:
+    def _build_stepwise_dataset(self, reactions: list[MultiStepReaction]) -> None:
         for rxn in tqdm(reactions, desc="Building stepwise dataset"):
             for step_idx, step in enumerate(rxn.steps):
                 try:
                     reactants_mol, reactants_data = process_mapped_smiles(
                         step.reactants_mapped, self.add_hs
                     )
-                    products_mol, _ = process_mapped_smiles(
-                        step.products_mapped, self.add_hs
-                    )
+                    products_mol, _ = process_mapped_smiles(step.products_mapped, self.add_hs)
 
                     delta = DeltaMatrixGenerator.delta_from_reactants_products(
                         reactants_mol, products_mol
@@ -91,15 +89,13 @@ class MechUSPTODataset(Dataset):
                     print(f"⚠️  Failed to process step {step_idx} in rxn {rxn.reaction_id}: {e}")
                     continue
 
-    def _build_end_to_end_dataset(self, reactions: List[MultiStepReaction]) -> None:
+    def _build_end_to_end_dataset(self, reactions: list[MultiStepReaction]) -> None:
         for rxn in tqdm(reactions, desc="Building end-to-end dataset"):
             try:
                 reactants_mol, reactants_data = process_mapped_smiles(
                     rxn.overall_reactants_smi, self.add_hs
                 )
-                products_mol, _ = process_mapped_smiles(
-                    rxn.overall_products_smi, self.add_hs
-                )
+                products_mol, _ = process_mapped_smiles(rxn.overall_products_smi, self.add_hs)
 
                 delta = DeltaMatrixGenerator.delta_from_reactants_products(
                     reactants_mol, products_mol

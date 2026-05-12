@@ -25,14 +25,17 @@ def mock_reaction(mock_reaction_dict) -> MultiStepReaction:
     """Mock reaction parsed into a ``MultiStepReaction``."""
     return MultiStepReaction(
         reaction_id=mock_reaction_dict["rxn_id"],
-        steps=[ReactionStep(
-            step_id=s["id"],
-            reactants_smi=s["reactants"],
-            products_smi=s["products"],
-            reactants_mapped=s["reactants_mapped"],
-            products_mapped=s["products_mapped"],
-            mechanism_arrow=s["mechanism"],
-        ) for s in mock_reaction_dict["steps"]],
+        steps=[
+            ReactionStep(
+                step_id=s["id"],
+                reactants_smi=s["reactants"],
+                products_smi=s["products"],
+                reactants_mapped=s["reactants_mapped"],
+                products_mapped=s["products_mapped"],
+                mechanism_arrow=s["mechanism"],
+            )
+            for s in mock_reaction_dict["steps"]
+        ],
         overall_reactants_smi=mock_reaction_dict["overall_reactants"],
         overall_products_smi=mock_reaction_dict["overall_products"],
         metadata=mock_reaction_dict.get("metadata", {}),

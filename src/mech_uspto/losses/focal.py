@@ -53,9 +53,7 @@ class MaskedFocalLossWithSpectators(nn.Module):
         targets_flat = targets.view(-1)
         mask_flat = mask_2d.view(-1)
 
-        ce_loss = F.cross_entropy(
-            logits_flat, targets_flat, weight=self.weights, reduction="none"
-        )
+        ce_loss = F.cross_entropy(logits_flat, targets_flat, weight=self.weights, reduction="none")
 
         # Focal loss modulation.
         pt = torch.exp(-ce_loss)

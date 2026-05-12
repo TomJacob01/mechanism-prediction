@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "mech_uspto contributors"},
+    {name = "Tom Jacob", email = "tomyakov01@gmail.com"},
 ]
 keywords = [
     "chemistry",
@@ -52,9 +52,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/<owner>/mech_uspto"
-Source = "https://github.com/<owner>/mech_uspto"
-Issues = "https://github.com/<owner>/mech_uspto/issues"
+Homepage = "https://github.com/TomJacob01/mechanism-prediction"
+Source = "https://github.com/TomJacob01/mechanism-prediction"
+Issues = "https://github.com/TomJacob01/mechanism-prediction/issues"
 
 [project.scripts]
 mech-uspto-train = "mech_uspto.scripts.train:main"

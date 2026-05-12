@@ -1,7 +1,6 @@
 """Dataclasses representing a mech-USPTO-31k reaction."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List
 
 
 @dataclass
@@ -21,10 +20,10 @@ class MultiStepReaction:
     """A complete multi-step reaction from mech-USPTO-31k."""
 
     reaction_id: str
-    steps: List[ReactionStep]
+    steps: list[ReactionStep]
     overall_reactants_smi: str
     overall_products_smi: str
-    metadata: Dict = field(default_factory=dict)
+    metadata: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Ensure steps are always ordered by step_id.

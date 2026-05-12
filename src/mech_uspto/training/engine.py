@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -48,7 +48,7 @@ class TrainingEngine:
             self.optimizer, mode="min", factor=0.5, patience=10, min_lr=1e-6
         )
 
-        self.history: Dict[str, list] = {
+        self.history: dict[str, list] = {
             "train_loss": [],
             "val_loss": [],
             "train_metrics": [],
@@ -67,34 +67,30 @@ class TrainingEngine:
 
     def _forward_and_loss(
         self, batch: Any
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward + loss. Returns ``(loss, logits, targets, mask)``."""
         targets = self._shift_targets(batch.y_padded)
 
-        logits, mask = self.model(
-            batch.x, batch.edge_index, batch.edge_attr, batch.batch
-        )
+        logits, mask = self.model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
         mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
 
         spectator_mask = getattr(batch, "spectator_padded", None)
         loss = self.criterion(logits, targets, mask_2d, spectator_mask)
         return loss, logits, targets, mask
 
-    def _train_step(self, batch: Any) -> Tuple[float, Dict[str, float]]:
+    def _train_step(self, batch: Any) -> tuple[float, dict[str, float]]:
         """One optimization step."""
         loss, logits, targets, mask = self._forward_and_loss(batch)
 
         self.optimizer.zero_grad()
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), self.config.max_grad_norm
-        )
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
         self.optimizer.step()
 
         metrics = MetricsComputer.get_mechanism_metrics(logits, targets, mask)
         return loss.item(), metrics
 
-    def _val_step(self, batch: Any) -> Tuple[float, Dict[str, float]]:
+    def _val_step(self, batch: Any) -> tuple[float, dict[str, float]]:
         """One forward-only step."""
         with torch.no_grad():
             loss, logits, targets, mask = self._forward_and_loss(batch)
@@ -103,12 +99,12 @@ class TrainingEngine:
 
     # -------------------------------------------------------------------- core
 
-    def run_epoch(self, loader, is_train: bool = True) -> Tuple[float, Dict]:
+    def run_epoch(self, loader, is_train: bool = True) -> tuple[float, dict]:
         """Run one full pass over ``loader``."""
         self.model.train() if is_train else self.model.eval()
 
         total_loss = 0.0
-        all_metrics: Dict[str, float] = {
+        all_metrics: dict[str, float] = {
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
@@ -207,10 +203,7 @@ class TrainingEngine:
             "history": self.history,
             "best_val_loss": self.best_val_loss,
         }
-        path = (
-            Path(self.config.checkpoint_dir)
-            / f"{self.config.task_mode}_{tag}_ep{epoch}.pt"
-        )
+        path = Path(self.config.checkpoint_dir) / f"{self.config.task_mode}_{tag}_ep{epoch}.pt"
         torch.save(checkpoint, path)
         print(f"   Saved checkpoint: {path}")
 
@@ -222,9 +215,7 @@ class TrainingEngine:
             "best_epoch": self.best_epoch,
             "best_val_loss": self.best_val_loss,
         }
-        results_path = (
-            Path(self.config.output_dir) / f"{self.config.task_mode}_results.json"
-        )
+        results_path = Path(self.config.output_dir) / f"{self.config.task_mode}_results.json"
         with open(results_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
         print(f"Saved results: {results_path}")

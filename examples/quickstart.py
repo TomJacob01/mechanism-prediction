@@ -36,10 +36,7 @@ def main() -> None:
 
     # 1. Parse the JSON reaction file.
     reaction = MechUSPTOParser.parse_json(str(fixture))
-    print(
-        f"Parsed reaction {reaction.reaction_id} "
-        f"with {len(reaction.steps)} step(s)."
-    )
+    print(f"Parsed reaction {reaction.reaction_id} with {len(reaction.steps)} step(s).")
 
     # 2. Featurize the first step's reactants.
     step = reaction.steps[0]

@@ -4,7 +4,7 @@ Produces 25-dim node features and 6-dim edge features (matching the PMechDB POC)
 Featurization helpers operate on RDKit ``Mol`` objects with mapped atoms.
 """
 
-from typing import Any, List, Tuple
+from typing import Any
 
 import torch
 from rdkit import Chem
@@ -19,7 +19,7 @@ from mech_uspto.constants import (
 )
 
 
-def one_hot_encode(value: Any, allowed_choices: List[Any]) -> List[int]:
+def one_hot_encode(value: Any, allowed_choices: list[Any]) -> list[int]:
     """One-hot encode ``value`` against ``allowed_choices``.
 
     Adds a trailing "unknown" bin so the encoding length is always
@@ -45,7 +45,7 @@ def align_atoms(mol: Chem.Mol) -> Chem.Mol:
 
 def featurize_nodes(aligned_mol: Chem.Mol) -> torch.Tensor:
     """Build the (N, 25) node-feature tensor."""
-    node_features: List[List[int]] = []
+    node_features: list[list[int]] = []
     for atom in aligned_mol.GetAtoms():
         element_one_hot = one_hot_encode(atom.GetAtomicNum(), ALLOWED_ELEMENTS)
         num_hs = atom.GetTotalNumHs() if atom.GetNumRadicalElectrons() == 0 else 0
@@ -69,10 +69,10 @@ def featurize_nodes(aligned_mol: Chem.Mol) -> torch.Tensor:
     return torch.tensor(node_features, dtype=torch.float)
 
 
-def featurize_edges(aligned_mol: Chem.Mol) -> Tuple[torch.Tensor, torch.Tensor]:
+def featurize_edges(aligned_mol: Chem.Mol) -> tuple[torch.Tensor, torch.Tensor]:
     """Build (edge_index, edge_attr) for the molecule."""
-    edge_indices: List[List[int]] = []
-    edge_features: List[List[int]] = []
+    edge_indices: list[list[int]] = []
+    edge_features: list[list[int]] = []
 
     for bond in aligned_mol.GetBonds():
         i, j = bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()
@@ -96,7 +96,7 @@ def featurize_edges(aligned_mol: Chem.Mol) -> Tuple[torch.Tensor, torch.Tensor]:
 def process_mapped_smiles(
     mapped_smiles: str,
     add_hs: bool = True,
-) -> Tuple[Chem.Mol, Data]:
+) -> tuple[Chem.Mol, Data]:
     """Parse a mapped SMILES into an RDKit ``Mol`` and a PyG ``Data`` object.
 
     Raises:
