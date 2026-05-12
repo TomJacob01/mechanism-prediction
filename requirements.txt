@@ -1,0 +1,13 @@
+# Runtime dependencies for mech_uspto.
+#
+# `pyproject.toml` is the source of truth for dependency declarations; this
+# file exists for users who prefer `pip install -r requirements.txt` over
+# `pip install -e .`. Versions intentionally not pinned — pin in your
+# environment lockfile (or use `environment.yml`).
+#
+# GPU users: install a CUDA-matched torch wheel BEFORE running this file.
+numpy
+tqdm
+torch
+torch_geometric
+rdkit

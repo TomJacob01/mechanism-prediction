@@ -1,0 +1,41 @@
+# Conda environment for mech_uspto.
+#
+# Default install is CPU-only. For GPU, replace `cpuonly` with the matching
+# `pytorch-cuda=XX.X` package (see https://pytorch.org/get-started/locally/),
+# and install torch_geometric per its CUDA matrix.
+#
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate mechuspto
+#   pip install -e ".[dev]"
+
+name: mechuspto
+channels:
+  - pytorch
+  - conda-forge
+  - nodefaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  # Scientific Python
+  - numpy
+  - tqdm
+
+  # Chemistry
+  - rdkit
+
+  # PyTorch (CPU). Swap `cpuonly` for `pytorch-cuda=12.1` (or your CUDA) on GPU.
+  - pytorch
+  - cpuonly
+
+  # Dev tooling
+  - pytest>=7
+  - ruff>=0.4
+  - pre-commit>=3
+
+  # PyG and the package itself install via pip — PyG's conda packaging lags
+  # the pip wheels, and `-e .` requires pip anyway.
+  - pip:
+      - torch_geometric

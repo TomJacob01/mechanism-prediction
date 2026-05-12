@@ -1,0 +1,16 @@
+{
+  "rxn_id": "rxn_test_001",
+  "steps": [
+    {
+      "id": 0,
+      "reactants": "CCO.CC(=O)Cl",
+      "products": "CCOC(C)=O.Cl",
+      "reactants_mapped": "[CH3:1][CH2:2][OH:3].[CH3:4][C:5](=[O:6])[Cl:7]",
+      "products_mapped": "[CH3:1][CH2:2][O:3][C:5](=[O:6])[CH3:4].[Cl:7]",
+      "mechanism": "nucleophilic_acyl_substitution"
+    }
+  ],
+  "overall_reactants": "CCO.CC(=O)Cl",
+  "overall_products": "CCOC(C)=O.Cl",
+  "metadata": {"source": "test", "num_steps": 1}
+}
