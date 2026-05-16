@@ -27,6 +27,8 @@ htmlcov/
 # Project outputs
 results/
 checkpoints/
+cache/
+slurm-logs/
 *.pt
 *.ckpt
 runs/
@@ -47,4 +49,4 @@ mlruns/
 # Private (machine-specific / sensitive — never publish)
 CLUSTER_SETUP.md
 legacy/
-scripts/sync.config.ps1
+sync.config.ps1

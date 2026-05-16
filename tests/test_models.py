@@ -6,7 +6,7 @@ import torch
 from mech_uspto.models.heads import DeltaMLP
 
 
-@pytest.mark.parametrize("num_classes", [3, 5])
+@pytest.mark.parametrize("num_classes", [3, 7])
 def test_delta_mlp_output_shape_and_symmetry(num_classes):
     head = DeltaMLP(hidden_dim=64, num_classes=num_classes, dropout=0.0)
     head.eval()

@@ -11,3 +11,4 @@ tqdm
 torch
 torch_geometric
 rdkit
+matplotlib

@@ -28,15 +28,16 @@ from mech_uspto.data.featurization import process_mapped_smiles
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
-    fixture = repo_root / "tests" / "fixtures" / "mock_reaction.json"
+    fixture = repo_root / "tests" / "fixtures" / "sample_reactions.csv"
     if not fixture.exists():
         raise SystemExit(f"Fixture not found: {fixture}")
 
     print(f"Loading bundled fixture: {fixture.relative_to(repo_root)}")
 
-    # 1. Parse the JSON reaction file.
-    reaction = MechUSPTOParser.parse_json(str(fixture))
-    print(f"Parsed reaction {reaction.reaction_id} with {len(reaction.steps)} step(s).")
+    # 1. Parse the CSV reaction file.
+    reactions = MechUSPTOParser.parse_csv_file(str(fixture))
+    reaction = reactions[0]
+    print(f"Parsed {len(reactions)} reactions; first id = {reaction.reaction_id}")
 
     # 2. Featurize the first step's reactants.
     step = reaction.steps[0]

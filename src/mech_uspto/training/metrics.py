@@ -46,33 +46,41 @@ def _metrics_for_sample(
     mol_logits: torch.Tensor,
     mol_targets: torch.Tensor,
     k: int,
-) -> tuple[int, int, int, int, int, torch.Tensor, torch.Tensor]:
-    """Per-sample (tp, fp, fn, topk_hits, total_rxns, scores, targets) over upper-triangle pairs.
+) -> tuple[int, int, int, int, int, int, torch.Tensor, torch.Tensor]:
+    """Per-sample (tp, fp, fn, n_rxn_preds, topk_hits, total_rxns, scores, targets) over upper-triangle pairs.
 
     ``scores`` and ``targets`` are returned so the caller can pool them across
     the batch / epoch and compute a single PR-AUC.
+    ``n_rxn_preds`` counts how many pairs the model actually predicted as a
+    non-no-change class. This distinguishes "model collapsed to no-change"
+    (n_rxn_preds == 0, P=R=0 trivially) from "model tries but misses"
+    (n_rxn_preds > 0, P=R=0 means every attempt was wrong).
     """
     mol_preds = torch.argmax(mol_logits, dim=-1)
 
-    # Reaction center = anything not the "no change" class (index 1 for 3-class,
-    # 2 for 5-class — but the original code conventions class 1 as "no change"
-    # for 3-class targets after the shift {-1,0,1} → {0,1,2}). We keep the
-    # original 3-class convention; for end-to-end the head is bigger but
-    # the same comparison "!= 1" treats class index 1 as the no-change class
-    # in both schemes after target shifting (1 maps to Δ=0 in stepwise and
-    # to Δ=-1 in 5-class — see note in metrics docs).
-    is_rxn_target = mol_targets != 1
-    is_rxn_pred = mol_preds != 1
+    # "No change" (Δ=0) is the middle index after target shifting:
+    #   3-class {-1,0,1} → {0,1,2}  → no-change = 1
+    #   7-class {-3..3}  → {0..6}   → no-change = 3
+    # In general: no_change_idx = num_classes // 2.
+    num_classes = mol_logits.shape[-1]
+    no_change_idx = num_classes // 2
+    is_rxn_target = mol_targets != no_change_idx
+    is_rxn_pred = mol_preds != no_change_idx
 
     tp = (is_rxn_pred & is_rxn_target & (mol_preds == mol_targets)).sum().item()
     fp = (is_rxn_pred & (~is_rxn_target | (mol_preds != mol_targets))).sum().item()
     fn = (is_rxn_target & (~is_rxn_pred | (mol_preds != mol_targets))).sum().item()
+    n_rxn_preds = is_rxn_pred.sum().item()
 
     mol_total_rxns = is_rxn_target.sum().item()
 
     probs = torch.softmax(mol_logits, dim=-1)
-    # "Any reaction" score = combined probability of the rare classes (first + last).
-    rxn_scores = probs[:, 0] + probs[:, -1]
+    # "Any reaction" score = total probability mass NOT on the no-change class.
+    # Equivalent to summing P(c) over all c != no_change_idx. This works for
+    # any num_classes; previously the code used probs[:, 0] + probs[:, -1]
+    # which was correct only for 3-class (where first+last == all-rare) and
+    # silently broken for 7-class (ignored P(Δ=±1) and P(Δ=±2)).
+    rxn_scores = 1.0 - probs[:, no_change_idx]
 
     topk_hits = 0
     if mol_total_rxns > 0:
@@ -83,7 +91,7 @@ def _metrics_for_sample(
             if tr_idx in top_indices:
                 topk_hits += 1
 
-    return tp, fp, fn, topk_hits, mol_total_rxns, rxn_scores.detach(), is_rxn_target.detach()
+    return tp, fp, fn, n_rxn_preds, topk_hits, mol_total_rxns, rxn_scores.detach(), is_rxn_target.detach()
 
 
 class MetricsComputer:
@@ -101,7 +109,7 @@ class MetricsComputer:
         mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
         triu_indices = torch.triu_indices(N, N, offset=1, device=logits.device)
 
-        tp, fp, fn, topk_hits, total_rxns = 0, 0, 0, 0, 0
+        tp, fp, fn, n_rxn_preds, topk_hits, total_rxns = 0, 0, 0, 0, 0, 0
         all_scores: list[torch.Tensor] = []
         all_targets: list[torch.Tensor] = []
 
@@ -114,12 +122,20 @@ class MetricsComputer:
 
             mol_logits = logits[b, idx0, idx1]
             mol_targets = targets[b, idx0, idx1]
-            s_tp, s_fp, s_fn, s_topk, s_total, s_scores, s_target_bin = _metrics_for_sample(
-                mol_logits, mol_targets, k
-            )
+            (
+                s_tp,
+                s_fp,
+                s_fn,
+                s_n_rxn_preds,
+                s_topk,
+                s_total,
+                s_scores,
+                s_target_bin,
+            ) = _metrics_for_sample(mol_logits, mol_targets, k)
             tp += s_tp
             fp += s_fp
             fn += s_fn
+            n_rxn_preds += s_n_rxn_preds
             topk_hits += s_topk
             total_rxns += s_total
             all_scores.append(s_scores)
@@ -146,4 +162,6 @@ class MetricsComputer:
             "tp": tp,
             "fp": fp,
             "fn": fn,
+            "n_rxn_preds": n_rxn_preds,
+            "n_rxn_targets": total_rxns,
         }

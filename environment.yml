@@ -22,6 +22,7 @@ dependencies:
   # Scientific Python
   - numpy
   - tqdm
+  - matplotlib
 
   # Chemistry
   - rdkit

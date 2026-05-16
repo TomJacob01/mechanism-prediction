@@ -12,13 +12,14 @@ import numpy as np
 import torch
 
 from mech_uspto.data.loaders import create_dataloaders
-from mech_uspto.training.config import DEFAULT_DATA_DIR, Config
+from mech_uspto.training.config import DEFAULT_DATA_PATH, Config
 from mech_uspto.training.engine import TrainingEngine
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train ReactionTransformer on mech-USPTO-31k")
-    parser.add_argument("--data-dir", type=str, default=DEFAULT_DATA_DIR)
+    parser.add_argument("--csv", type=str, default=DEFAULT_DATA_PATH,
+                        help="Path to mech-USPTO-31k CSV file")
     parser.add_argument(
         "--task-mode",
         type=str,
@@ -37,7 +38,7 @@ def main() -> None:
     args = parse_args()
 
     config = Config(
-        data_dir=args.data_dir,
+        csv_path=args.csv,
         task_mode=args.task_mode,
         batch_size=args.batch_size,
         hidden_dim=args.hidden_dim,
@@ -49,9 +50,9 @@ def main() -> None:
     np.random.seed(config.seed)
     torch.manual_seed(config.seed)
 
-    print(f"📂 Loading dataset from {config.data_dir}...")
+    print(f"📂 Loading dataset from {config.csv_path}...")
     dataloaders = create_dataloaders(
-        config.data_dir,
+        config.csv_path,
         task_mode=config.task_mode,
         batch_size=config.batch_size,
         compute_spectators=True,
@@ -63,7 +64,7 @@ def main() -> None:
 
     print("\n✅ Training completed!")
     print(f"   Best epoch: {engine.best_epoch}")
-    print(f"   Best val loss: {engine.best_val_loss:.4f}")
+    print(f"   Best val loss: {engine.best_val_loss:.3e}")
     print(f"   Results saved to: {config.output_dir}")
 
 

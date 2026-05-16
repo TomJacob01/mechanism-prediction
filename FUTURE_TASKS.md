@@ -4,11 +4,77 @@ Backlog of work that is **not** part of the current refactor. Ordered roughly
 by impact, with rough effort estimates. Each item has enough detail that you
 (or a contributor) can pick it up cold.
 
-Legend: 🔴 blocker for serious training • 🟡 important • 🟢 nice-to-have
+Legend: 🔴 blocker for serious training • 🟡 important • 🟢 nice-to-have • ✅ done
+
+---
+
+## ✅ Recently completed (May 2026)
+
+**Phase A — CSV pipeline + 7-class end-to-end.**
+- CSV parser for `mech-USPTO-31k.csv` (31,364 reactions), replaced JSON dir layout
+- 7 output classes for end-to-end (Δ ∈ {-3,..,+3} → {0,..,6}) with chemically symmetric
+  weights `[1, 2, 4, 1, 4, 2, 1]`
+- `_shift_targets` in engine handles `+3` shift for end-to-end
+- Δ-distribution sanity script (`scripts/sanity_check.py`) — confirmed Δ=0 dominates 97.5%
+- Cluster sync (`sync.config.ps1` + `~/Documents/PowerShell/Tools/sync.ps1`)
+
+**Phase B — Cache + SLURM productionization.**
+- SHA256-keyed disk cache for featurized datasets (`cache/{task_mode}_{hash16}.pt`).
+  First parse ~10 min, subsequent loads ~1 sec
+- Refactored `create_dataloaders` to build **one** `MechUSPTODataset` and split via
+  `torch.utils.data.Subset` (was: 3 separate datasets reparsing the same CSV)
+- `scripts/slurm/train.sbatch` with proper conda activation, LF line endings,
+  partition `newton`, account `cslab`, 24h walltime
+- Verified end-to-end on Newton cluster (L40S / A40 GPUs)
+
+**Bug fixes found this session.**
+- **Focal loss spectator-mask shape**: collator emits `(B, N)` per-atom mask but loss
+  expected `(B, N, N)` per-pair. Added auto-broadcast via
+  `unsqueeze(2) & unsqueeze(1)` (pair is spectator iff both atoms are).
+- **Stepwise target dtype**: `delta` was float, `cross_entropy` needs Long. Added
+  `delta.long()` in `_build_stepwise_dataset`.
+- **Collator mutating Data objects** (killed job 68205018 at start of epoch 2 with
+  `pad(NoneType)`): PyG Data items are shared by reference across epochs; `del d.y`
+  destroyed them after epoch 1. Fixed by cloning Data and stripping fields on the clone.
+  Regression test: `test_collation_does_not_mutate_input_data`.
+- **Metrics hardcoded `!= 1` for no-change class** (produced fake F1=0.976 at epoch 1):
+  legacy 3-class assumption (no-change=index 1). For 7-class, no-change=index 3.
+  Fixed by deriving `no_change_idx = num_classes // 2`. Regression tests:
+  `test_mechanism_metrics_no_reactions_present_7class`,
+  `test_mechanism_metrics_detects_true_reaction_7class`.
+- **PR-AUC scorer ignoring middle rare classes** (produced misleadingly nonzero 0.05
+  while P/R were 0): scorer used `probs[:, 0] + probs[:, -1]` which was correct only
+  for 3-class. For 7-class it silently dropped P(Δ=±1) and P(Δ=±2). Fixed to
+  `1 - probs[:, no_change_idx]`. Regression test:
+  `test_pr_auc_uses_full_non_no_change_mass_7class`.
+
+**Infrastructure / dev-experience.**
+- `.gitattributes` — enforces LF for `*.sbatch`, `*.sh` to prevent Windows CRLF
+  breaking remote bash scripts
+- `.gitignore` updated for `cache/`, `slurm-logs/`
+- Memory notes recorded in `/memories/cluster.md` for: rsync exclude anchoring,
+  conda-in-sbatch `$@` pollution, `set -u` + conda activate hooks, slurmctld
+  user-filter failure on AD-domain backslash usernames
+
+---
+
+## 🔴 0. PR-AUC granularity (per-class, not just binary "any reaction")
+
+**What.** Current PR-AUC asks "can model rank rare-class pairs above no-change pairs?"
+That's a binary collapse. For end-to-end with 7 classes, we should also report
+**per-class one-vs-rest PR-AUC** so we can tell if the model distinguishes Δ=+1 from
+Δ=-2 (chemically very different) vs. just "something happened".
+
+**Why.** A model that always picks "no-change OR Δ=0 (no-change again)" can score
+high on the binary metric while being useless for the actual reaction prediction.
+
+**Touches.** `training/metrics.py` (new `per_class_pr_auc` helper),
+`scripts/evaluate.py` (consume it).
 
 ---
 
 ## 🔴 1. Test-set evaluation script
+
 
 **What.** `scripts/evaluate.py` that loads a checkpoint, runs the held-out
 test split (`train_val_test_split=(0.7, 0.15, 0.15)`), and reports the full
@@ -333,3 +399,59 @@ graduates to "tool other people use."
 - **No `version.py`.** `mech_uspto.__version__` doesn't exist yet; users
   can't programmatically check what they're running. Add `_version.py` and
   expose from `__init__.py`.
+
+---
+
+## Newly discovered (May 2026 — to triage)
+
+- 🔴 **Distinguish "P=0 because wrong" vs "P=undefined because no predictions made."**
+  Current `precision = tp / (tp + fp + 1e-8)` returns 0.0 in both cases. Early in
+  training the model never predicts a rare class → `tp+fp=0` → reported P=0 looks like
+  a failure when it's actually "no signal yet." Either return `NaN` and treat in the
+  display layer, or report an extra `n_rare_predictions` counter so users can tell
+  the two regimes apart. **Touches.** `training/metrics.py`, the `Epoch X | ...`
+  print line in `training/engine.py`.
+
+- 🔴 **Stepwise parser cannot decompose elementary steps.** Two tests in
+  `test_integration.py` and `test_dataset.py` are `xfail`'d because the parser
+  treats the full multi-step reaction as a single step, so deltas can exceed ±1
+  for stepwise mode. Need to either (a) parse the original mechanism strings into
+  individual elementary arrow-pushes, or (b) document that stepwise mode is
+  currently unsupported on `mech-USPTO-31k.csv` and only works on the legacy
+  JSON-formatted fixture. Without this, the stepwise-vs-end-to-end ablation
+  comparison cannot run.
+
+- 🟡 **Class-imbalance handling for end-to-end.** Confirmed empirically that
+  with current focal `gamma=2` + weights `[1,2,4,1,4,2,1]` the model collapses to
+  predicting Δ=0 everywhere through at least 2 epochs on hidden_dim=32. Worth a
+  small ablation: try `gamma=3` or `gamma=4`, try `weights=[1,4,16,1,16,4,1]`,
+  try over-sampling rare classes via `WeightedRandomSampler`. **Why.** Without
+  this the model can have great loss but zero TP — see also the per-class PR-AUC
+  task above.
+
+- 🟡 **Class collapse warning at end of epoch.** Add a one-liner in
+  `training/engine.py`: if `metrics["tp"] == 0` for the validation epoch, print
+  a clear `⚠️ Model predicting only no-change class — consider stronger class
+  weights, higher focal gamma, or oversampling.` So users don't stare at zeros
+  for ten epochs wondering whether it's a bug.
+
+- 🟢 **`scripts/plot_history.py`** that consumes the `history.json` saved per
+  epoch and produces a PNG with train+val loss curves and overlaid F1 / PR-AUC.
+  Trivial matplotlib script. Useful before W&B integration lands (item 6).
+
+- 🟢 **Confusion matrix output.** `scripts/evaluate.py` (item 1) should emit a
+  7×7 confusion matrix in CSV + PNG. Helps see which classes the model conflates
+  (likely Δ=+1↔-1 symmetry confusion).
+
+- 🟢 **Move tqdm to stdout, or use `--info=epoch-only` flag.** Tqdm goes to
+  stderr by convention but it confuses SLURM users who see all their progress
+  in the `.err` file thinking it's an error log. Either set
+  `tqdm(..., file=sys.stdout)` or add a `--quiet` flag that disables tqdm and
+  prints only end-of-epoch summaries.
+
+- 🟢 **`squeue` wrapper for the AD-domain backslash bug.** Add a project-local
+  shell function `sqme() { squeue --name=mech-train "$@"; }` in `scripts/slurm/`
+  so users don't have to remember the filter trick (since `squeue -u
+  'STAFF\tom-jacob'` fails — slurmctld can't resolve AD usernames; see
+  `/memories/cluster.md`).
+

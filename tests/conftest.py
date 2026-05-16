@@ -1,53 +1,33 @@
 """Shared pytest fixtures."""
 
-import json
-import shutil
 from pathlib import Path
 
 import pytest
 
 from mech_uspto.data.dataset import MechUSPTODataset
-from mech_uspto.data.schema import MultiStepReaction, ReactionStep
+from mech_uspto.data.parser import MechUSPTOParser
+from mech_uspto.data.schema import MultiStepReaction
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
-MOCK_REACTION_PATH = FIXTURES_DIR / "mock_reaction.json"
+SAMPLE_CSV_PATH = FIXTURES_DIR / "sample_reactions.csv"
 
 
 @pytest.fixture
-def mock_reaction_dict() -> dict:
-    """Raw JSON dict for the mock reaction."""
-    with open(MOCK_REACTION_PATH) as f:
-        return json.load(f)
+def sample_csv_path() -> Path:
+    """Path to the bundled real-data CSV fixture (2 rows from figshare)."""
+    return SAMPLE_CSV_PATH
 
 
 @pytest.fixture
-def mock_reaction(mock_reaction_dict) -> MultiStepReaction:
-    """Mock reaction parsed into a ``MultiStepReaction``."""
-    return MultiStepReaction(
-        reaction_id=mock_reaction_dict["rxn_id"],
-        steps=[
-            ReactionStep(
-                step_id=s["id"],
-                reactants_smi=s["reactants"],
-                products_smi=s["products"],
-                reactants_mapped=s["reactants_mapped"],
-                products_mapped=s["products_mapped"],
-                mechanism_arrow=s["mechanism"],
-            )
-            for s in mock_reaction_dict["steps"]
-        ],
-        overall_reactants_smi=mock_reaction_dict["overall_reactants"],
-        overall_products_smi=mock_reaction_dict["overall_products"],
-        metadata=mock_reaction_dict.get("metadata", {}),
-    )
+def sample_reactions() -> list[MultiStepReaction]:
+    """All reactions parsed from the sample CSV fixture."""
+    return MechUSPTOParser.parse_csv_file(str(SAMPLE_CSV_PATH))
 
 
 @pytest.fixture
-def tmp_json_dir(tmp_path, mock_reaction_dict) -> Path:
-    """Temp dir containing a single mock reaction JSON file."""
-    target = tmp_path / "rxn_test_001.json"
-    shutil.copy(MOCK_REACTION_PATH, target)
-    return tmp_path
+def mock_reaction(sample_reactions) -> MultiStepReaction:
+    """First reaction from the sample CSV (used for downstream tests)."""
+    return sample_reactions[0]
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from typing import Optional
 
 import torch
 
-DEFAULT_DATA_DIR = os.environ.get("MECH_USPTO_DATA", "./data/mech-USPTO-31k")
+DEFAULT_DATA_PATH = os.environ.get("MECH_USPTO_DATA", "./data/mech-USPTO-31k.csv")
 
 
 @dataclass
@@ -19,7 +19,7 @@ class Config:
     """
 
     # Paths
-    data_dir: str = DEFAULT_DATA_DIR
+    csv_path: str = DEFAULT_DATA_PATH
     output_dir: str = "./results"
     checkpoint_dir: str = "./checkpoints"
 
@@ -47,7 +47,7 @@ class Config:
 
     # Loss shaping
     class_weights: Optional[torch.Tensor] = field(default=None, repr=False)
-    gamma_focal: float = 2.5
+    gamma_focal: float = 3.5
     spectator_weight: float = 0.1
 
     # Runtime
@@ -59,11 +59,14 @@ class Config:
             self.num_classes = 3
             if self.class_weights is None:
                 # Upweight the rare ±1 classes vs. the dominant 0 class.
-                self.class_weights = torch.tensor([4.0, 1.0, 4.0])
+                self.class_weights = torch.tensor([8.0, 1.0, 8.0])
         elif self.task_mode == "end_to_end":
-            self.num_classes = 5
+            self.num_classes = 7
             if self.class_weights is None:
-                self.class_weights = torch.tensor([2.0, 4.0, 1.0, 4.0, 2.0])
+                # Δ ∈ {-3,-2,-1,0,1,2,3}; class 3 (idx 3) is the dominant "no change".
+                # Strong weights to combat class collapse on imbalanced data
+                # (Δ=0 is ~97.5% of all pairs in mech-USPTO-31k).
+                self.class_weights = torch.tensor([2.0, 4.0, 16.0, 1.0, 16.0, 4.0, 2.0])
         else:
             raise ValueError(f"Unknown task_mode: {self.task_mode!r}")
 

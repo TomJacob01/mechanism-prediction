@@ -64,7 +64,11 @@ class MaskedFocalLossWithSpectators(nn.Module):
 
         # Downweight spectator positions.
         if spectator_mask is not None:
-            spectator_flat = spectator_mask.view(-1)
+            # Accept either per-atom (B, N) or per-pair (B, N, N) masks.
+            if spectator_mask.dim() == 2:
+                # Pair (i,j) is a spectator iff BOTH atoms are spectators.
+                spectator_mask = spectator_mask.unsqueeze(2) & spectator_mask.unsqueeze(1)
+            spectator_flat = spectator_mask.reshape(-1)
             spectator_weight = torch.where(
                 spectator_flat,
                 torch.tensor(self.spectator_weight, device=spectator_flat.device),

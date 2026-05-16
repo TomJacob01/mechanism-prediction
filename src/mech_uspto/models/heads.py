@@ -7,8 +7,8 @@ import torch.nn as nn
 class DeltaMLP(nn.Module):
     """Pairwise MLP head producing per-pair Δ logits.
 
-    Supports either 3-class (stepwise: {-1, 0, 1}) or 5-class
-    (end-to-end: {-2, -1, 0, 1, 2}) outputs.
+    Supports either 3-class (stepwise: {-1, 0, 1}) or 7-class
+    (end-to-end: {-3, -2, -1, 0, 1, 2, 3}) outputs.
     """
 
     def __init__(
@@ -18,8 +18,8 @@ class DeltaMLP(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        if num_classes not in (3, 5):
-            raise ValueError(f"num_classes must be 3 or 5, got {num_classes}")
+        if num_classes not in (3, 7):
+            raise ValueError(f"num_classes must be 3 or 7, got {num_classes}")
 
         self.num_classes = num_classes
         self.mlp = nn.Sequential(

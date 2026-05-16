@@ -1,4 +1,4 @@
-"""Pre-flight sanity checks for a mech-USPTO-31k data drop.
+"""Pre-flight sanity checks for a mech-USPTO-31k CSV data drop.
 
 Run BEFORE launching training to catch problems early. Exits non-zero when a
 required check fails.
@@ -6,33 +6,36 @@ required check fails.
 Checks performed:
 
 1.  Environment   — torch / torch_geometric / rdkit importable, CUDA visibility.
-2.  Data layout   — ``data_dir`` exists and contains ``*.json`` files.
-3.  Schema        — random JSON files have the required top-level keys.
-4.  Parsing       — ``MechUSPTOParser.parse_batch`` succeeds on a sample.
-5.  Featurization — ``process_mapped_smiles`` round-trips on a sample.
-6.  Δ stats       — stepwise Δ stays in [-1, 1]; end-to-end Δ stays in [-2, 2].
-7.  Spectator stats — average spectator ratio is within the expected band.
-8.  Mini training step — one forward + backward + optimizer step on a tiny
+2.  Data layout   — CSV file exists and has the expected header.
+3.  Parsing       — ``MechUSPTOParser.parse_csv_file`` succeeds.
+4.  Featurization — ``process_mapped_smiles`` round-trips on a sample.
+5.  Δ stats       — stepwise Δ stays in [-1, 1]; end-to-end Δ stays in [-2, 2].
+6.  Spectator stats — average spectator ratio is within the expected band.
+7.  Mini training step — one forward + backward + optimizer step on a tiny
     batch verifies the entire loop end-to-end (model, loss, metrics).
 
 Usage::
 
-    python scripts/sanity_check.py --data-dir /path/to/mech-USPTO-31k
-    python scripts/sanity_check.py --data-dir <dir> --sample-size 50 --quick
+    python scripts/sanity_check.py --csv /path/to/mech-USPTO-31k.csv
+    python scripts/sanity_check.py --csv <file> --sample-size 50 --quick
 """
 
 import argparse
-import json
+import csv
 import random
 import sys
 import traceback
 from pathlib import Path
 
-REQUIRED_TOP_KEYS = {"rxn_id", "steps"}
-REQUIRED_STEP_KEYS = {"id", "reactants_mapped", "products_mapped"}
-EXPECTED_SPECTATOR_RATIO_BAND = (0.50, 0.99)  # USPTO molecules are mostly inert.
+EXPECTED_HEADER = {
+    "original_reactions",
+    "updated_reaction",
+    "mechanistic_class",
+    "mechanistic_label",
+    "data_source",
+}
+EXPECTED_SPECTATOR_RATIO_BAND = (0.50, 0.99)
 
-# ANSI colour codes (no extra deps).
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -57,7 +60,7 @@ def fail(msg: str) -> None:
 
 
 def check_environment() -> bool:
-    print("\n[1/8] Environment")
+    print("\n[1/7] Environment")
     try:
         import rdkit  # noqa: F401
         import torch
@@ -73,59 +76,34 @@ def check_environment() -> bool:
     return True
 
 
-def check_data_layout(data_dir: Path) -> list[Path] | None:
-    print("\n[2/8] Data layout")
-    if not data_dir.exists():
-        fail(f"data_dir does not exist: {data_dir}")
-        return None
-    json_files = sorted(data_dir.glob("*.json"))
-    if not json_files:
-        fail(f"No *.json files found in {data_dir}")
-        return None
-    ok(f"Found {len(json_files)} JSON files in {data_dir}")
-    return json_files
-
-
-def check_schema(json_files: list[Path], sample_size: int) -> bool:
-    print(f"\n[3/8] Schema check on {sample_size} random files")
-    sample = random.sample(json_files, min(sample_size, len(json_files)))
-    bad: list[tuple[Path, str]] = []
-    for path in sample:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:  # noqa: BLE001
-            bad.append((path, f"unreadable JSON: {e}"))
-            continue
-        missing = REQUIRED_TOP_KEYS - set(data)
-        if missing:
-            bad.append((path, f"missing top-level keys: {missing}"))
-            continue
-        if not isinstance(data["steps"], list) or not data["steps"]:
-            bad.append((path, "empty or malformed 'steps'"))
-            continue
-        for step in data["steps"]:
-            step_missing = REQUIRED_STEP_KEYS - set(step)
-            if step_missing:
-                bad.append((path, f"step missing keys: {step_missing}"))
-                break
-    if bad:
-        fail(f"{len(bad)}/{len(sample)} files failed schema check")
-        for path, reason in bad[:5]:
-            print(f"   - {path.name}: {reason}")
+def check_csv_layout(csv_path: Path) -> bool:
+    print("\n[2/7] CSV layout")
+    if not csv_path.exists():
+        fail(f"CSV file does not exist: {csv_path}")
         return False
-    ok(f"All {len(sample)} sampled files have required keys")
+    with open(csv_path, encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+    if header is None:
+        fail("CSV file is empty")
+        return False
+    header_set = set(header)
+    missing = EXPECTED_HEADER - header_set
+    if missing:
+        fail(f"CSV header missing columns: {missing}")
+        return False
+    ok(f"CSV file found with header columns: {header}")
     return True
 
 
-def check_parsing(data_dir: Path):
-    print("\n[4/8] Parser")
+def check_parsing(csv_path: Path):
+    print("\n[3/7] Parser")
     from mech_uspto.data.parser import MechUSPTOParser
 
     try:
-        reactions = MechUSPTOParser.parse_batch(str(data_dir))
+        reactions = MechUSPTOParser.parse_csv_file(str(csv_path))
     except Exception as e:  # noqa: BLE001
-        fail(f"parse_batch raised: {e}")
+        fail(f"parse_csv_file raised: {e}")
         traceback.print_exc()
         return None
     if not reactions:
@@ -136,7 +114,7 @@ def check_parsing(data_dir: Path):
 
 
 def check_featurization(reactions, sample_size: int) -> bool:
-    print(f"\n[5/8] Featurization round-trip on {sample_size} samples")
+    print(f"\n[4/7] Featurization round-trip on {sample_size} samples")
     from mech_uspto.data.featurization import process_mapped_smiles
 
     sample = random.sample(reactions, min(sample_size, len(reactions)))
@@ -165,31 +143,49 @@ def check_featurization(reactions, sample_size: int) -> bool:
 
 
 def check_delta_stats(reactions, sample_size: int) -> bool:
-    print(f"\n[6/8] Δ statistics on {sample_size} samples (both modes)")
+    print(f"\n[5/7] Δ statistics on {sample_size} samples (both modes)")
+    from collections import Counter
+
+    import torch
+
     from mech_uspto.data.dataset import MechUSPTODataset
 
     sample = random.sample(reactions, min(sample_size, len(reactions)))
     all_good = True
-    for mode, lo, hi in [("stepwise", -1, 1), ("end_to_end", -2, 2)]:
+    for mode, lo, hi in [("stepwise", -1, 1), ("end_to_end", -3, 3)]:
         ds = MechUSPTODataset(sample, task_mode=mode, compute_spectators=True)
         if len(ds) == 0:
             fail(f"{mode}: dataset built 0 samples")
             all_good = False
             continue
         violations = 0
+        hist: Counter[int] = Counter()
         for d in ds.data_points:
-            if d.y.min().item() < lo or d.y.max().item() > hi:
+            y = d.y
+            if y.min().item() < lo or y.max().item() > hi:
                 violations += 1
+            # Count only upper-triangle (bond changes are symmetric).
+            n = y.shape[0]
+            triu = y[torch.triu_indices(n, n, offset=1).unbind(0)]
+            for v in triu.tolist():
+                hist[int(v)] += 1
         if violations:
             fail(f"{mode}: {violations}/{len(ds)} samples have Δ outside [{lo}, {hi}]")
             all_good = False
         else:
             ok(f"{mode}: all {len(ds)} samples have Δ ∈ [{lo}, {hi}]")
+        # Print histogram (sorted by Δ value) — helps decide class counts.
+        total = sum(hist.values()) or 1
+        bars = []
+        for v in sorted(hist):
+            pct = 100 * hist[v] / total
+            bars.append(f"Δ={v:+d}: {hist[v]:,} ({pct:.3f}%)")
+        print("   " + " | ".join(bars))
     return all_good
 
 
 def check_spectator_ratio(reactions, sample_size: int) -> bool:
-    print(f"\n[7/8] Spectator ratio (band {EXPECTED_SPECTATOR_RATIO_BAND})")
+    print(f"\n[6/7] Spectator ratio (band {EXPECTED_SPECTATOR_RATIO_BAND})")
     from mech_uspto.data.dataset import MechUSPTODataset
 
     sample = random.sample(reactions, min(sample_size, len(reactions)))
@@ -203,11 +199,11 @@ def check_spectator_ratio(reactions, sample_size: int) -> bool:
         ok(f"Average spectator ratio = {avg:.2%} (within {lo:.0%}–{hi:.0%})")
         return True
     warn(f"Average spectator ratio = {avg:.2%} outside expected band {lo:.0%}–{hi:.0%}")
-    return True  # warning, not a hard failure
+    return True
 
 
 def check_mini_training_step(reactions, batch_size: int) -> bool:
-    print("\n[8/8] Mini training step (1 forward + backward + optimizer)")
+    print("\n[7/7] Mini training step (1 forward + backward + optimizer)")
     import torch
 
     from mech_uspto.data.dataset import MechUSPTODataset
@@ -238,7 +234,7 @@ def check_mini_training_step(reactions, batch_size: int) -> bool:
     )
     optim = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    targets = batch.y_padded + 1  # {-1,0,1} → {0,1,2}
+    targets = batch.y_padded + 1
     logits, mask = model(batch.x, batch.edge_index, batch.edge_attr, batch.batch)
     mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
     spectator = getattr(batch, "spectator_padded", None)
@@ -260,35 +256,26 @@ def check_mini_training_step(reactions, batch_size: int) -> bool:
     return True
 
 
-# --------------------------------------------------------------------------- #
-# Driver
-# --------------------------------------------------------------------------- #
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
-    parser.add_argument("--data-dir", type=str, required=True)
+    parser.add_argument("--csv", type=str, required=True, help="Path to mech-USPTO-31k CSV file")
     parser.add_argument("--sample-size", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--quick", action="store_true", help="Skip the mini-training step (steps 1-7 only)."
+        "--quick", action="store_true", help="Skip the mini-training step (steps 1-6 only)."
     )
     args = parser.parse_args()
 
     random.seed(args.seed)
-    data_dir = Path(args.data_dir)
+    csv_path = Path(args.csv)
 
     if not check_environment():
         return 1
-
-    json_files = check_data_layout(data_dir)
-    if json_files is None:
-        return 1
-    if not check_schema(json_files, args.sample_size):
+    if not check_csv_layout(csv_path):
         return 1
 
-    reactions = check_parsing(data_dir)
+    reactions = check_parsing(csv_path)
     if reactions is None:
         return 1
 
@@ -303,7 +290,7 @@ def main() -> int:
         if not check_mini_training_step(reactions, args.batch_size):
             return 1
     else:
-        print("\n[8/8] skipped (--quick)")
+        print("\n[7/7] skipped (--quick)")
 
     print(f"\n{GREEN}🎉 All sanity checks passed.{RESET}")
     return 0

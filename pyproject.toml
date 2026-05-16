@@ -41,6 +41,7 @@ dependencies = [
     "torch",
     "torch_geometric",
     "rdkit",
+    "matplotlib",
 ]
 
 [project.optional-dependencies]

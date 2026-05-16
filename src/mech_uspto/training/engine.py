@@ -63,7 +63,7 @@ class TrainingEngine:
         """Shift task-specific Δ range to non-negative class indices."""
         if self.config.task_mode == "stepwise":
             return y_padded + 1  # {-1, 0, 1} → {0, 1, 2}
-        return y_padded + 2  # {-2..2} → {0..4}
+        return y_padded + 3  # {-3..3} → {0..6}
 
     def _forward_and_loss(
         self, batch: Any
@@ -113,6 +113,8 @@ class TrainingEngine:
             "tp": 0,
             "fp": 0,
             "fn": 0,
+            "n_rxn_preds": 0,
+            "n_rxn_targets": 0,
         }
         num_batches = 0
 
@@ -134,11 +136,11 @@ class TrainingEngine:
 
             num_batches += 1
             if is_train:
-                pbar.set_postfix({"loss": f"{loss_val:.4f}"})
+                pbar.set_postfix({"loss": f"{loss_val:.3e}"})
 
         avg_loss = total_loss / max(num_batches, 1)
         for key in all_metrics:
-            if key not in ("tp", "fp", "fn"):
+            if key not in ("tp", "fp", "fn", "n_rxn_preds", "n_rxn_targets"):
                 all_metrics[key] /= max(num_batches, 1)
 
         # Recompute precision/recall/F1 from accumulated tp/fp/fn for accuracy.
@@ -173,13 +175,37 @@ class TrainingEngine:
 
             print(
                 f"\nEpoch {epoch + 1:3d}/{self.config.num_epochs} | "
-                f"TrL: {train_loss:.4f} | "
-                f"VL: {val_loss:.4f} | "
-                f"F1: {val_metrics['f1']:.3f} | "
-                f"Rec: {val_metrics['recall']:.3f} | "
-                f"Prec: {val_metrics['precision']:.3f} | "
-                f"PR-AUC: {val_metrics['pr_auc']:.3f}"
+                f"TrL: {train_loss:.3e} | "
+                f"VL: {val_loss:.3e} | "
+                f"F1: {val_metrics['f1']:.3e} | "
+                f"Rec: {val_metrics['recall']:.3e} | "
+                f"Prec: {val_metrics['precision']:.3e} | "
+                f"PR-AUC: {val_metrics['pr_auc']:.3e} | "
+                f"RxnPreds: {int(val_metrics['n_rxn_preds'])}/{int(val_metrics['n_rxn_targets'])} "
+                f"(TP {int(val_metrics['tp'])} FP {int(val_metrics['fp'])} FN {int(val_metrics['fn'])})"
             )
+
+            # Empirical class-collapse warning: if the model has not predicted a
+            # single rare class across the whole validation set, P/R are 0 by
+            # construction (not by bug). Tell the user explicitly.
+            if val_metrics["n_rxn_preds"] == 0 and val_metrics["n_rxn_targets"] > 0:
+                print(
+                    "   ⚠️  Model predicted no-change for ALL pairs this epoch — "
+                    "class collapse. Consider higher focal gamma, stronger class "
+                    "weights, or oversampling rare classes."
+                )
+            # Inverted collapse: predicting reaction everywhere. Signature is
+            # n_rxn_preds >> n_rxn_targets AND precision close to zero.
+            elif (
+                val_metrics["n_rxn_targets"] > 0
+                and val_metrics["n_rxn_preds"] > 10 * val_metrics["n_rxn_targets"]
+                and val_metrics["precision"] < 0.01
+            ):
+                print(
+                    "   ⚠️  Model predicted reaction for >10x more pairs than truth — "
+                    "inverted collapse (loss likely under-weights the no-change class). "
+                    "Consider weaker rare-class weights or lower focal gamma."
+                )
 
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
