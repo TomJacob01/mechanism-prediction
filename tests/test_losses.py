@@ -59,9 +59,7 @@ def test_spectator_mask_accepts_per_atom_shape():
     logits, targets, mask_2d = _make_inputs(B=B, N=N, num_classes=C)
     criterion = MaskedFocalLossWithSpectators(num_classes=C, gamma=2.0)
 
-    per_atom = torch.tensor(
-        [[True, True, False, False, False], [False, False, True, True, True]]
-    )
+    per_atom = torch.tensor([[True, True, False, False, False], [False, False, True, True, True]])
     per_pair = per_atom.unsqueeze(2) & per_atom.unsqueeze(1)
 
     loss_atom = criterion(logits, targets, mask_2d, spectator_mask=per_atom).item()

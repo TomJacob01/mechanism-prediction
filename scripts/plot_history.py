@@ -64,8 +64,13 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
     ax.plot(epochs, history["val_loss"], label="val", marker="s", linewidth=1.5)
     best_epoch = results.get("best_epoch")
     if isinstance(best_epoch, int):
-        ax.axvline(best_epoch + 1, color="green", linestyle="--", alpha=0.5,
-                   label=f"best (epoch {best_epoch + 1})")
+        ax.axvline(
+            best_epoch + 1,
+            color="green",
+            linestyle="--",
+            alpha=0.5,
+            label=f"best (epoch {best_epoch + 1})",
+        )
     ax.set_xlabel("epoch")
     ax.set_ylabel("loss")
     ax.set_title("Loss")
@@ -76,10 +81,8 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
     ax = axes[0, 1]
     val_metrics = history["val_metrics"]
     ax.plot(epochs, _series(val_metrics, "f1"), label="F1", marker="o", linewidth=1.5)
-    ax.plot(epochs, _series(val_metrics, "precision"), label="precision",
-            marker="s", linewidth=1.5)
-    ax.plot(epochs, _series(val_metrics, "recall"), label="recall",
-            marker="^", linewidth=1.5)
+    ax.plot(epochs, _series(val_metrics, "precision"), label="precision", marker="s", linewidth=1.5)
+    ax.plot(epochs, _series(val_metrics, "recall"), label="recall", marker="^", linewidth=1.5)
     ax.set_xlabel("epoch")
     ax.set_ylabel("metric")
     ax.set_title("Validation F1 / Precision / Recall (rare classes only)")
@@ -89,10 +92,8 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
 
     # --- Panel 3: PR-AUC + top-k acc -------------------------------------
     ax = axes[1, 0]
-    ax.plot(epochs, _series(val_metrics, "pr_auc"), label="PR-AUC",
-            marker="o", linewidth=1.5)
-    ax.plot(epochs, _series(val_metrics, "topk_acc"), label="top-k acc",
-            marker="s", linewidth=1.5)
+    ax.plot(epochs, _series(val_metrics, "pr_auc"), label="PR-AUC", marker="o", linewidth=1.5)
+    ax.plot(epochs, _series(val_metrics, "topk_acc"), label="top-k acc", marker="s", linewidth=1.5)
     ax.set_xlabel("epoch")
     ax.set_ylabel("score")
     ax.set_title("Validation PR-AUC & top-k accuracy")
@@ -105,8 +106,7 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
     n_preds = _series(val_metrics, "n_rxn_preds")
     n_targets = _series(val_metrics, "n_rxn_targets")
     tp_vals = _series(val_metrics, "tp")
-    ax.plot(epochs, n_targets, label="targets (constant)",
-            linestyle=":", color="gray")
+    ax.plot(epochs, n_targets, label="targets (constant)", linestyle=":", color="gray")
     ax.plot(epochs, n_preds, label="rxn predictions", marker="o", linewidth=1.5)
     ax.plot(epochs, tp_vals, label="true positives", marker="^", linewidth=1.5)
     ax.set_xlabel("epoch")
@@ -123,14 +123,19 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("results", type=Path,
-                   help="Path to <task_mode>_results.json")
-    p.add_argument("--output", type=Path, default=None,
-                   help="Output PNG path (default: same dir as input, "
-                        "<basename>_history.png)")
-    p.add_argument("--show", action="store_true",
-                   help="Open the plot interactively (requires a GUI backend; "
-                        "ignored if matplotlib can't open a display).")
+    p.add_argument("results", type=Path, help="Path to <task_mode>_results.json")
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output PNG path (default: same dir as input, <basename>_history.png)",
+    )
+    p.add_argument(
+        "--show",
+        action="store_true",
+        help="Open the plot interactively (requires a GUI backend; "
+        "ignored if matplotlib can't open a display).",
+    )
     return p.parse_args()
 
 

@@ -46,15 +46,29 @@ def _metrics_for_sample(
     mol_logits: torch.Tensor,
     mol_targets: torch.Tensor,
     k: int,
-) -> tuple[int, int, int, int, int, int, torch.Tensor, torch.Tensor]:
-    """Per-sample (tp, fp, fn, n_rxn_preds, topk_hits, total_rxns, scores, targets) over upper-triangle pairs.
+) -> tuple[
+    int,
+    int,
+    int,
+    int,
+    int,
+    int,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    list[int],
+    list[int],
+]:
+    """Per-sample reaction-center metrics over upper-triangle pairs.
 
-    ``scores`` and ``targets`` are returned so the caller can pool them across
-    the batch / epoch and compute a single PR-AUC.
-    ``n_rxn_preds`` counts how many pairs the model actually predicted as a
-    non-no-change class. This distinguishes "model collapsed to no-change"
-    (n_rxn_preds == 0, P=R=0 trivially) from "model tries but misses"
-    (n_rxn_preds > 0, P=R=0 means every attempt was wrong).
+    Returns ``(tp, fp, fn, n_rxn_preds, topk_hits, total_rxns, scores,
+    target_bin, probs, targets, n_preds_per_class, n_targets_per_class)``.
+
+    The extra last four entries support per-class PR-AUC pooling and the
+    "did the model predict this class at all?" diagnostic that distinguishes
+    ``P=0 because everything was wrong`` from ``P=undefined because nothing
+    was predicted``.
     """
     mol_preds = torch.argmax(mol_logits, dim=-1)
 
@@ -91,7 +105,26 @@ def _metrics_for_sample(
             if tr_idx in top_indices:
                 topk_hits += 1
 
-    return tp, fp, fn, n_rxn_preds, topk_hits, mol_total_rxns, rxn_scores.detach(), is_rxn_target.detach()
+    # Per-class counters: how many pairs the model assigned to each class, and
+    # how many true pairs of each class exist. Lets callers distinguish
+    # "didn't try class c" (n_preds[c] == 0) from "tried but wrong".
+    n_preds_per_class = torch.bincount(mol_preds, minlength=num_classes).tolist()
+    n_targets_per_class = torch.bincount(mol_targets, minlength=num_classes).tolist()
+
+    return (
+        tp,
+        fp,
+        fn,
+        n_rxn_preds,
+        topk_hits,
+        mol_total_rxns,
+        rxn_scores.detach(),
+        is_rxn_target.detach(),
+        probs.detach(),
+        mol_targets.detach(),
+        n_preds_per_class,
+        n_targets_per_class,
+    )
 
 
 class MetricsComputer:
@@ -105,13 +138,17 @@ class MetricsComputer:
         k: int = 3,
     ) -> dict[str, float]:
         """Reaction-center metrics over the upper-triangle of each batch sample."""
-        B, N, _, _ = logits.shape
+        B, N, _, num_classes = logits.shape
         mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
         triu_indices = torch.triu_indices(N, N, offset=1, device=logits.device)
 
         tp, fp, fn, n_rxn_preds, topk_hits, total_rxns = 0, 0, 0, 0, 0, 0
         all_scores: list[torch.Tensor] = []
         all_targets: list[torch.Tensor] = []
+        all_probs: list[torch.Tensor] = []
+        all_class_targets: list[torch.Tensor] = []
+        n_preds_per_class = [0] * num_classes
+        n_targets_per_class = [0] * num_classes
 
         for b in range(B):
             m = mask_2d[b]
@@ -131,6 +168,10 @@ class MetricsComputer:
                 s_total,
                 s_scores,
                 s_target_bin,
+                s_probs,
+                s_class_targets,
+                s_n_preds,
+                s_n_targets,
             ) = _metrics_for_sample(mol_logits, mol_targets, k)
             tp += s_tp
             fp += s_fp
@@ -140,18 +181,40 @@ class MetricsComputer:
             total_rxns += s_total
             all_scores.append(s_scores)
             all_targets.append(s_target_bin)
+            all_probs.append(s_probs)
+            all_class_targets.append(s_class_targets)
+            for c in range(num_classes):
+                n_preds_per_class[c] += s_n_preds[c]
+                n_targets_per_class[c] += s_n_targets[c]
 
         precision = tp / (tp + fp + 1e-8)
         recall = tp / (tp + fn + 1e-8)
         f1 = 2 * precision * recall / (precision + recall + 1e-8)
         topk_acc = topk_hits / (total_rxns + 1e-8)
 
+        pr_auc_per_class = [0.0] * num_classes
         if all_scores:
-            pooled_scores = torch.cat(all_scores)
-            pooled_targets = torch.cat(all_targets)
+            pooled_scores = torch.cat(all_scores).cpu()
+            pooled_targets = torch.cat(all_targets).cpu()
+            pooled_probs = torch.cat(all_probs).cpu()  # (M, num_classes)
+            pooled_class_targets = torch.cat(all_class_targets).cpu()  # (M,)
+            # Per-batch PR-AUC retained for at-a-glance progress prints; the
+            # engine recomputes a *pooled* PR-AUC over the whole epoch using
+            # the ``_pooled_*`` buffers below (averaging per-batch APs is
+            # mathematically wrong — APs are not additive).
             pr_auc = binary_pr_auc(pooled_scores, pooled_targets)
+            for c in range(num_classes):
+                # One-vs-rest: score = P(class=c), positives = (target == c).
+                pr_auc_per_class[c] = binary_pr_auc(
+                    pooled_probs[:, c],
+                    (pooled_class_targets == c).to(torch.float32),
+                )
         else:
             pr_auc = 0.0
+            pooled_scores = torch.empty(0)
+            pooled_targets = torch.empty(0)
+            pooled_probs = torch.empty(0, num_classes)
+            pooled_class_targets = torch.empty(0, dtype=torch.long)
 
         return {
             "precision": precision,
@@ -164,4 +227,49 @@ class MetricsComputer:
             "fn": fn,
             "n_rxn_preds": n_rxn_preds,
             "n_rxn_targets": total_rxns,
+            "pr_auc_per_class": pr_auc_per_class,
+            "n_preds_per_class": n_preds_per_class,
+            "n_targets_per_class": n_targets_per_class,
+            # Raw buffers (CPU, detached) for epoch-level pooled PR-AUC.
+            # Keys prefixed with "_" so callers know they're for aggregation,
+            # not direct reporting.
+            "_pooled_scores": pooled_scores,
+            "_pooled_targets": pooled_targets,
+            "_pooled_probs": pooled_probs,
+            "_pooled_class_targets": pooled_class_targets,
         }
+
+
+def pooled_pr_auc(
+    scores_list: list[torch.Tensor],
+    targets_list: list[torch.Tensor],
+    probs_list: list[torch.Tensor],
+    class_targets_list: list[torch.Tensor],
+    num_classes: int,
+) -> tuple[float, list[float]]:
+    """Pool batch-level buffers and compute (overall, per-class) PR-AUC once.
+
+    AP is the area under a step function over the *full* score ranking, so it
+    cannot be computed batch-by-batch and averaged. This helper concatenates
+    all per-batch tensors and runs ``binary_pr_auc`` exactly once.
+
+    Args:
+        scores_list: per-batch 1-D tensors of "any non-no-change" scores.
+        targets_list: per-batch 1-D tensors of binary (is-reaction) targets.
+        probs_list: per-batch (M_b, num_classes) softmax-probability tensors.
+        class_targets_list: per-batch 1-D tensors of integer class targets.
+        num_classes: number of classes (used to size the per-class output).
+
+    Returns:
+        ``(overall_pr_auc, per_class_pr_auc)``. Empty inputs return zeros.
+    """
+    per_class = [0.0] * num_classes
+    overall = 0.0
+    if scores_list:
+        overall = binary_pr_auc(torch.cat(scores_list), torch.cat(targets_list))
+    if probs_list and num_classes > 0:
+        pooled_probs = torch.cat(probs_list)
+        pooled_ct = torch.cat(class_targets_list)
+        for c in range(num_classes):
+            per_class[c] = binary_pr_auc(pooled_probs[:, c], (pooled_ct == c).to(torch.float32))
+    return overall, per_class

@@ -42,8 +42,29 @@ if [[ "$*" != *"--csv"* ]]; then
 fi
 
 # Tag the output dir with the job id so concurrent runs don't collide.
+OUTPUT_DIR="results/${SLURM_JOB_NAME}-${SLURM_JOB_ID}"
 if [[ "$*" != *"--output-dir"* ]]; then
-    set -- "$@" --output-dir "results/${SLURM_JOB_NAME}-${SLURM_JOB_ID}"
+    set -- "$@" --output-dir "$OUTPUT_DIR"
+fi
+
+# Task mode controls which JSON file the engine writes
+# (engine.save_results -> <output_dir>/<task_mode>_results.json).
+TASK_MODE="end_to_end"
+if [[ "$*" == *"--task-mode"*"stepwise"* ]]; then
+    TASK_MODE="stepwise"
+fi
+
+# --- Mode-specific loss-shaping defaults (overridable from CLI) ------------
+# These mirror the Config defaults adopted after the May 2026 runs showed
+# strong rare-class weights + gamma=2 focal pushed the model into inverted
+# collapse (RxnPreds > targets by epoch 8). Setting them here explicitly
+# documents the run config in the slurm log AND guards against a future
+# Config edit silently changing what this sbatch ships.
+if [[ "$TASK_MODE" == "end_to_end" && "$*" != *"--class-weights"* ]]; then
+    set -- "$@" --class-weights "1,1.5,3,1,3,1.5,1"
+fi
+if [[ "$*" != *"--warmup-steps"* ]]; then
+    set -- "$@" --warmup-steps "130"
 fi
 
 echo "================================================================"
@@ -55,6 +76,51 @@ echo "================================================================"
 
 # -u: unbuffered stdout/stderr so the slurm log tails live.
 python -u scripts/train.py "$@"
+
+echo "================================================================"
+echo "Training finished: $(date -Iseconds)"
+echo "================================================================"
+
+# --- Auto-eval + auto-plot -------------------------------------------------
+# Pick the best checkpoint (highest epoch with the "best" tag) from this run's
+# per-run checkpoint dir. Per-run dir is set automatically by Config when
+# checkpoint_dir is not overridden.
+RESULTS_JSON="${OUTPUT_DIR}/${TASK_MODE}_results.json"
+CKPT_DIR="${OUTPUT_DIR}/checkpoints"
+BEST_CKPT="$(ls -1 ${CKPT_DIR}/${TASK_MODE}_best_ep*.pt 2>/dev/null \
+    | sort -V | tail -n 1)"
+
+# Pick up --csv that was either user-supplied or defaulted above.
+CSV_ARG=""
+prev=""
+for tok in "$@"; do
+    if [[ "$prev" == "--csv" ]]; then
+        CSV_ARG="$tok"
+        break
+    fi
+    prev="$tok"
+done
+
+if [[ -n "$BEST_CKPT" ]]; then
+    echo "Auto-eval: $BEST_CKPT on test split"
+    python -u scripts/evaluate.py \
+        --checkpoint "$BEST_CKPT" \
+        --csv "$CSV_ARG" \
+        --split test \
+        --output "${OUTPUT_DIR}/test_eval.json" \
+        --confusion-csv "${OUTPUT_DIR}/test_confusion.csv" \
+        || echo "WARN: auto-eval failed (non-fatal)"
+else
+    echo "WARN: no best checkpoint found in ${CKPT_DIR}, skipping auto-eval"
+fi
+
+if [[ -f "$RESULTS_JSON" ]]; then
+    echo "Auto-plot: $RESULTS_JSON"
+    python -u scripts/plot_history.py "$RESULTS_JSON" \
+        || echo "WARN: auto-plot failed (non-fatal)"
+else
+    echo "WARN: $RESULTS_JSON not found, skipping auto-plot"
+fi
 
 echo "================================================================"
 echo "Finished:   $(date -Iseconds)"

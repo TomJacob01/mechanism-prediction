@@ -51,6 +51,9 @@ dev = [
     "pre-commit>=3",
     "build",
 ]
+tracking = [
+    "wandb>=0.16",
+]
 
 [project.urls]
 Homepage = "https://github.com/TomJacob01/mechanism-prediction"

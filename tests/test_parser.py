@@ -4,21 +4,16 @@ import pytest
 
 from mech_uspto.data.parser import MechUSPTOParser
 
-
 # ---------------------------------------------------------------------------
 # Inline CSV-row tests (fast, no file IO)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def csv_row_simple():
     """Single-step reaction (synthetic) used to exercise parse_csv_row."""
     # Quote the mechanism label because it contains commas.
-    return (
-        '[O:1][CH3:2]>>[OH:1].[CH3:2],'
-        '[O:1][CH3:2]>>[OH:1].[CH3:2],'
-        'homolysis,'
-        '"[(1, 2)]"'
-    )
+    return '[O:1][CH3:2]>>[OH:1].[CH3:2],[O:1][CH3:2]>>[OH:1].[CH3:2],homolysis,"[(1, 2)]"'
 
 
 def test_parse_csv_row_returns_multi_step_reaction(csv_row_simple):
@@ -54,6 +49,7 @@ def test_parse_csv_row_rejects_too_few_columns():
 # ---------------------------------------------------------------------------
 # Real-data file tests (read the actual figshare CSV sample on disk)
 # ---------------------------------------------------------------------------
+
 
 def test_parse_csv_file_loads_all_rows(sample_csv_path):
     """Parsing the real sample CSV yields one MultiStepReaction per row."""

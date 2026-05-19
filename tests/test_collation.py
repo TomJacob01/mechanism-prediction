@@ -38,9 +38,7 @@ def test_create_dataloaders_smoke(sample_csv_path, tmp_path):
     )
     assert set(loaders.keys()) == {"train", "val", "test"}
     total = (
-        len(loaders["train"].dataset)
-        + len(loaders["val"].dataset)
-        + len(loaders["test"].dataset)
+        len(loaders["train"].dataset) + len(loaders["val"].dataset) + len(loaders["test"].dataset)
     )
     assert total == 2
 

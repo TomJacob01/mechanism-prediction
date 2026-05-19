@@ -30,9 +30,8 @@ from tqdm.auto import tqdm
 
 from mech_uspto.data.loaders import create_dataloaders
 from mech_uspto.models.transformer import ReactionTransformer
-from mech_uspto.training.config import DEFAULT_DATA_PATH, Config
+from mech_uspto.training.config import Config
 from mech_uspto.training.metrics import MetricsComputer
-
 
 # ---------------------------------------------------------------- checkpoint IO
 
@@ -181,20 +180,37 @@ def write_confusion_csv(confusion: list[list[int]], path: Path, shift: int) -> N
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--checkpoint", type=Path, required=True,
-                   help="Path to a training checkpoint .pt file.")
-    p.add_argument("--csv", type=str, default=None,
-                   help="Override the CSV path stored in the checkpoint's config. "
-                        "Useful if data moved between training and eval.")
+    p.add_argument(
+        "--checkpoint", type=Path, required=True, help="Path to a training checkpoint .pt file."
+    )
+    p.add_argument(
+        "--csv",
+        type=str,
+        default=None,
+        help="Override the CSV path stored in the checkpoint's config. "
+        "Useful if data moved between training and eval.",
+    )
     p.add_argument("--split", choices=["train", "val", "test"], default="test")
-    p.add_argument("--batch-size", type=int, default=None,
-                   help="Override checkpoint's batch_size (eval doesn't backprop, "
-                        "you can usually use a larger batch).")
-    p.add_argument("--output", type=Path, default=None,
-                   help="Path to write the eval JSON (default: alongside checkpoint, "
-                        "<checkpoint_stem>_<split>_eval.json).")
-    p.add_argument("--confusion-csv", type=Path, default=None,
-                   help="Optional CSV path for the confusion matrix.")
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Override checkpoint's batch_size (eval doesn't backprop, "
+        "you can usually use a larger batch).",
+    )
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Path to write the eval JSON (default: alongside checkpoint, "
+        "<checkpoint_stem>_<split>_eval.json).",
+    )
+    p.add_argument(
+        "--confusion-csv",
+        type=Path,
+        default=None,
+        help="Optional CSV path for the confusion matrix.",
+    )
     return p.parse_args()
 
 
@@ -206,8 +222,10 @@ def main() -> None:
     print(f"Loading checkpoint {args.checkpoint}...")
     ckpt = load_checkpoint(args.checkpoint, device)
     config: Config = ckpt["config"]
-    print(f"   task_mode={config.task_mode}, num_classes={config.num_classes}, "
-          f"hidden_dim={config.hidden_dim}, epoch={ckpt.get('epoch', '?')}")
+    print(
+        f"   task_mode={config.task_mode}, num_classes={config.num_classes}, "
+        f"hidden_dim={config.hidden_dim}, epoch={ckpt.get('epoch', '?')}"
+    )
 
     if args.csv:
         config.csv_path = args.csv
@@ -253,8 +271,10 @@ def main() -> None:
     shift = 1 if config.task_mode == "stepwise" else 3
     for c in range(config.num_classes):
         pc = metrics["per_class"][f"class_{c}"]
-        print(f"  delta={c - shift:+d}: support={pc['support']:>9,}  "
-              f"P={pc['precision']:.3f}  R={pc['recall']:.3f}  F1={pc['f1']:.3f}")
+        print(
+            f"  delta={c - shift:+d}: support={pc['support']:>9,}  "
+            f"P={pc['precision']:.3f}  R={pc['recall']:.3f}  F1={pc['f1']:.3f}"
+        )
 
     # --- save ----------------------------------------------------------------
     output = args.output or args.checkpoint.with_name(

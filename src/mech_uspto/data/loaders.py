@@ -1,5 +1,6 @@
 """Collation function and high-level dataloader factory."""
 
+import os
 import random
 from typing import Optional
 
@@ -11,6 +12,42 @@ from torch_geometric.data import Batch, Data
 
 from mech_uspto.data.dataset import MechUSPTODataset
 from mech_uspto.data.parser import MechUSPTOParser
+
+
+def seed_everything(seed: int, deterministic: bool = True) -> None:
+    """Seed every RNG that affects training, for run-to-run reproducibility.
+
+    Covers ``random``, ``numpy``, ``torch`` (CPU + all CUDA devices), and the
+    ``PYTHONHASHSEED`` env var (affects dict / set ordering in child processes).
+    When ``deterministic`` is True, also forces cuDNN into deterministic mode
+    (disables autotuner) — costs ~5-10% throughput but gives bitwise-stable
+    runs on the same hardware. Required for "did X actually help?" comparisons.
+
+    Note: full bitwise reproducibility across runs *also* requires the
+    DataLoader to use ``worker_init_fn=_seed_worker`` and an explicit
+    ``generator`` — see ``create_dataloaders``.
+    """
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def _seed_worker(worker_id: int) -> None:
+    """DataLoader ``worker_init_fn`` that re-seeds RNGs inside each worker process.
+
+    Without this, multi-worker shuffling order depends on worker startup
+    timing → non-reproducible epoch ordering with ``num_workers > 0``.
+    PyTorch passes a base seed to each worker via ``initial_seed()``; we
+    derive ``numpy`` / ``random`` seeds from it so all three RNGs agree.
+    """
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 def collate_fn_with_spectators(data_list: list[Optional[Data]]) -> Optional[Batch]:
@@ -78,9 +115,9 @@ def create_dataloaders(
     """Parse ``csv_path``, build one cached dataset, return train/val/test DataLoaders."""
     from torch.utils.data import Subset
 
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    # Best-effort: seed everything before any RNG-touching work. Caller may
+    # have already called ``seed_everything`` directly; this is idempotent.
+    seed_everything(seed)
 
     print(f"📂 Parsing mech-USPTO-31k from {csv_path}...")
     reactions = MechUSPTOParser.parse_csv_file(csv_path)
@@ -105,15 +142,17 @@ def create_dataloaders(
     val_idx = indices[n_train : n_train + n_val]
     test_idx = indices[n_train + n_val :]
 
-    print(
-        f"   Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}"
-    )
+    print(f"   Train: {len(train_idx)}, Val: {len(val_idx)}, Test: {len(test_idx)}")
 
     train_dataset = Subset(full_dataset, train_idx)
     val_dataset = Subset(full_dataset, val_idx)
     test_dataset = Subset(full_dataset, test_idx)
 
     print(f"📊 Creating dataloaders (batch_size={batch_size})...")
+    # Dedicated CPU generator → reproducible shuffle order across runs even
+    # with num_workers > 0 (pair with worker_init_fn=_seed_worker).
+    train_generator = torch.Generator()
+    train_generator.manual_seed(seed)
     return {
         "train": DataLoader(
             train_dataset,
@@ -121,6 +160,8 @@ def create_dataloaders(
             shuffle=True,
             num_workers=num_workers,
             collate_fn=collate_fn_with_spectators,
+            worker_init_fn=_seed_worker,
+            generator=train_generator,
         ),
         "val": DataLoader(
             val_dataset,
@@ -128,6 +169,7 @@ def create_dataloaders(
             shuffle=False,
             num_workers=num_workers,
             collate_fn=collate_fn_with_spectators,
+            worker_init_fn=_seed_worker,
         ),
         "test": DataLoader(
             test_dataset,
@@ -135,5 +177,6 @@ def create_dataloaders(
             shuffle=False,
             num_workers=num_workers,
             collate_fn=collate_fn_with_spectators,
+            worker_init_fn=_seed_worker,
         ),
     }

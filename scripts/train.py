@@ -8,18 +8,19 @@ Usage::
 
 import argparse
 
-import numpy as np
 import torch
 
-from mech_uspto.data.loaders import create_dataloaders
+from mech_uspto.data.loaders import create_dataloaders, seed_everything
 from mech_uspto.training.config import DEFAULT_DATA_PATH, Config
 from mech_uspto.training.engine import TrainingEngine
+from mech_uspto.training.tracking import make_tracker
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train ReactionTransformer on mech-USPTO-31k")
-    parser.add_argument("--csv", type=str, default=DEFAULT_DATA_PATH,
-                        help="Path to mech-USPTO-31k CSV file")
+    parser.add_argument(
+        "--csv", type=str, default=DEFAULT_DATA_PATH, help="Path to mech-USPTO-31k CSV file"
+    )
     parser.add_argument(
         "--task-mode",
         type=str,
@@ -31,13 +32,77 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-epochs", type=int, default=100)
     parser.add_argument("--output-dir", type=str, default="./results")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--class-weights",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated per-class loss weights "
+            "(length must match num_classes for the task mode). "
+            "Default: hand-picked weights from Config."
+        ),
+    )
+    parser.add_argument(
+        "--gamma-focal",
+        type=float,
+        default=None,
+        help="Focal-loss gamma (default: 3.5 from Config). 0 disables focal weighting.",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=0,
+        help=(
+            "Linear LR warmup over the first N optimizer steps (0 disables). "
+            "~5%% of total train steps is a good starting point."
+        ),
+    )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help=(
+            "Path to a checkpoint .pt to resume from. Restores model, optimizer, "
+            "history, and best-val-loss; continues training from checkpoint epoch + 1."
+        ),
+    )
+    parser.add_argument(
+        "--no-amp",
+        action="store_true",
+        help="Disable bf16 autocast on CUDA (default: enabled). Use to debug numerical issues.",
+    )
+    parser.add_argument(
+        "--no-deterministic",
+        action="store_true",
+        help=(
+            "Disable cuDNN deterministic mode (default: enabled). Trades reproducibility "
+            "for ~5-10%% throughput. Only use after baseline runs are reproduced."
+        ),
+    )
+    parser.add_argument(
+        "--tracker",
+        type=str,
+        default="none",
+        choices=["none", "wandb"],
+        help="Experiment tracker backend (default: none). Use 'wandb' for W&B.",
+    )
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default="mech-uspto",
+        help="W&B project name (only used when --tracker wandb).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    config = Config(
+    class_weights = None
+    if args.class_weights is not None:
+        class_weights = torch.tensor([float(x) for x in args.class_weights.split(",")])
+
+    config_kwargs = dict(
         csv_path=args.csv,
         task_mode=args.task_mode,
         batch_size=args.batch_size,
@@ -46,19 +111,40 @@ def main() -> None:
         output_dir=args.output_dir,
         seed=args.seed,
     )
+    if class_weights is not None:
+        config_kwargs["class_weights"] = class_weights
+    if args.gamma_focal is not None:
+        config_kwargs["gamma_focal"] = args.gamma_focal
+    if args.warmup_steps:
+        config_kwargs["warmup_steps"] = args.warmup_steps
+    if args.no_amp:
+        config_kwargs["use_amp"] = False
+    if args.no_deterministic:
+        config_kwargs["deterministic"] = False
 
-    np.random.seed(config.seed)
-    torch.manual_seed(config.seed)
+    config = Config(**config_kwargs)
+
+    seed_everything(config.seed, deterministic=config.deterministic)
 
     print(f"📂 Loading dataset from {config.csv_path}...")
     dataloaders = create_dataloaders(
         config.csv_path,
         task_mode=config.task_mode,
         batch_size=config.batch_size,
+        num_workers=config.num_workers,
+        seed=config.seed,
         compute_spectators=True,
     )
 
-    engine = TrainingEngine(config)
+    engine = TrainingEngine(
+        config,
+        tracker=make_tracker(
+            args.tracker,
+            **({"project": args.wandb_project} if args.tracker == "wandb" else {}),
+        ),
+    )
+    if args.resume is not None:
+        engine.load_state(args.resume)
     engine.train(dataloaders["train"], dataloaders["val"])
     engine.save_results()
 
