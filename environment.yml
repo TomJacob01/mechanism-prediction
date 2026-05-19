@@ -1,8 +1,12 @@
 # Conda environment for mech_uspto.
 #
-# Default install is CPU-only. For GPU, replace `cpuonly` with the matching
-# `pytorch-cuda=XX.X` package (see https://pytorch.org/get-started/locally/),
-# and install torch_geometric per its CUDA matrix.
+# Default install assumes a CUDA 12.4-capable GPU (A40 / L40S / RTX 30+ /
+# RTX 40+ / H100). For CPU-only, replace `pytorch-cuda=12.4` and the
+# `nvidia` channel with `cpuonly`.
+#
+# Why this matters: PyPI's default `torch` wheel for Linux is CPU-only with
+# no warning. Without this pin a routine `pip install torch` will silently
+# train on CPU on the cluster (~50x slower; see May 2026 incident).
 #
 # Usage:
 #   conda env create -f environment.yml
@@ -12,6 +16,7 @@
 name: mechuspto
 channels:
   - pytorch
+  - nvidia
   - conda-forge
   - nodefaults
 
@@ -27,9 +32,10 @@ dependencies:
   # Chemistry
   - rdkit
 
-  # PyTorch (CPU). Swap `cpuonly` for `pytorch-cuda=12.1` (or your CUDA) on GPU.
-  - pytorch
-  - cpuonly
+  # PyTorch with CUDA 12.4. For CPU-only swap `pytorch-cuda=12.4` for `cpuonly`
+  # and drop the `nvidia` channel above.
+  - pytorch=2.5.1
+  - pytorch-cuda=12.4
 
   # Dev tooling
   - pytest>=7

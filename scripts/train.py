@@ -9,6 +9,7 @@ Usage::
 print("↑ Python started, importing dependencies (torch/pyg/rdkit ≈ 5–15s)...", flush=True)
 
 import argparse
+import sys
 
 import torch
 
@@ -18,6 +19,38 @@ from mech_uspto.training.engine import TrainingEngine
 from mech_uspto.training.tracking import make_tracker
 
 print(f"↓ Imports done. torch {torch.__version__}, CUDA available: {torch.cuda.is_available()}", flush=True)
+
+
+def _device_banner(require_cuda: bool) -> None:
+    """Print a loud, unambiguous device banner and optionally abort on CPU.
+
+    Prevents silent CPU fallback — a CPU-only torch wheel on a GPU host is
+    one of the most common and least visible failure modes in PyTorch.
+    With ``require_cuda=True`` (recommended for cluster jobs), exits with
+    code 2 instead of training at ~1/50 the expected throughput.
+    """
+    cuda_ok = torch.cuda.is_available()
+    if cuda_ok:
+        name = torch.cuda.get_device_name(0)
+        cap = torch.cuda.get_device_capability(0)
+        print("=" * 70, flush=True)
+        print(f"✅ DEVICE: CUDA   |   {name}   |   sm_{cap[0]}{cap[1]}   |   torch CUDA={torch.version.cuda}", flush=True)
+        print("=" * 70, flush=True)
+        return
+    msg_lines = [
+        "=" * 70,
+        "🚨 DEVICE: CPU   —   torch.cuda.is_available() == False",
+        f"   torch={torch.__version__}   torch.version.cuda={torch.version.cuda!r}",
+        "   If you intended to use a GPU, the installed torch wheel is the CPU",
+        "   build (or the CUDA runtime is missing). Reinstall with:",
+        "     pip install --index-url https://download.pytorch.org/whl/cu124 torch==2.5.1",
+        "=" * 70,
+    ]
+    for line in msg_lines:
+        print(line, flush=True)
+    if require_cuda:
+        print("--require-cuda set; aborting before training starts.", flush=True)
+        sys.exit(2)
 
 
 def parse_args() -> argparse.Namespace:
@@ -76,6 +109,15 @@ def parse_args() -> argparse.Namespace:
         help="Disable bf16 autocast on CUDA (default: enabled). Use to debug numerical issues.",
     )
     parser.add_argument(
+        "--require-cuda",
+        action="store_true",
+        help=(
+            "Abort with exit code 2 if torch.cuda.is_available() is False. Use on "
+            "GPU jobs to fail fast instead of silently falling back to CPU (~50x "
+            "slowdown). Recommended for all cluster submissions."
+        ),
+    )
+    parser.add_argument(
         "--no-deterministic",
         action="store_true",
         help=(
@@ -101,6 +143,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    _device_banner(require_cuda=args.require_cuda)
 
     class_weights = None
     if args.class_weights is not None:

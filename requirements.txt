@@ -2,13 +2,18 @@
 #
 # `pyproject.toml` is the source of truth for dependency declarations; this
 # file exists for users who prefer `pip install -r requirements.txt` over
-# `pip install -e .`. Versions intentionally not pinned — pin in your
-# environment lockfile (or use `environment.yml`).
+# `pip install -e .`.
 #
-# GPU users: install a CUDA-matched torch wheel BEFORE running this file.
+# torch is pinned to the CUDA 12.4 build. The PyPI default wheel for `torch`
+# is CPU-only with the same version number, so without this pin pip will
+# silently install a CPU build on Linux and training will fall back to CPU
+# with no error (~50x slowdown; see commit history for the May 2026 incident).
+# CPU-only users: drop the `+cu124` suffix and the --extra-index-url line.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.5.1+cu124
+
 numpy
 tqdm
-torch
 torch_geometric
 rdkit
 matplotlib

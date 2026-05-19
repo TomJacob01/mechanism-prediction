@@ -67,6 +67,14 @@ if [[ "$*" != *"--warmup-steps"* ]]; then
     set -- "$@" --warmup-steps "130"
 fi
 
+# Always fail fast on accidental CPU runs on the cluster. If the conda env
+# ever loses its CUDA-build torch, this aborts before training instead of
+# burning the wall-clock at ~1/50 GPU throughput. Override by removing the
+# flag explicitly for CPU-only debugging runs.
+if [[ "$*" != *"--require-cuda"* ]]; then
+    set -- "$@" --require-cuda
+fi
+
 echo "================================================================"
 echo "Job:        ${SLURM_JOB_ID} on $(hostname)"
 echo "GPU:        $(nvidia-smi --query-gpu=name --format=csv,noheader)"
