@@ -95,11 +95,13 @@ class Config:
             self.num_classes = 7
             if self.class_weights is None:
                 # Δ ∈ {-3,-2,-1,0,1,2,3}; class 3 (idx 3) is the dominant "no change".
-                # Tuned to balance "predict rare classes" vs "inverted collapse where
-                # the model predicts reaction everywhere". The original [2,4,16,1,16,4,2]
-                # caused inverted collapse in the May 2026 runs (RxnPreds > targets by
-                # epoch 8); these values keep the rare-class signal without dominating.
-                self.class_weights = torch.tensor([1.0, 1.5, 3.0, 1.0, 3.0, 1.5, 1.0])
+                # c4 (Δ=+1) bumped to 5.0 vs c2 (Δ=−1) at 3.0: test eval of run 68209851
+                # showed asymmetric collapse — Δ=−1 F1=0.92, Δ=+1 F1=0.04 — even though
+                # supports are similar (158k vs 99k). Bond *formation* loses to "keep
+                # Δ=0" more than bond *breaking* does; extra weight on +1 to compensate.
+                # Earlier [2,4,16,1,16,4,2] caused inverted collapse (RxnPreds > targets
+                # by epoch 8); these values keep rare-class signal without dominating.
+                self.class_weights = torch.tensor([1.0, 1.5, 3.0, 1.0, 5.0, 1.5, 1.0])
         else:
             raise ValueError(f"Unknown task_mode: {self.task_mode!r}")
 

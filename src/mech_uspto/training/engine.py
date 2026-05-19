@@ -190,7 +190,9 @@ class TrainingEngine:
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
-            "topk_acc": 0.0,
+            "exact_match_top1": 0.0,
+            "exact_match_hits": 0,
+            "exact_match_total": 0,
             "pr_auc": 0.0,
             "tp": 0,
             "fp": 0,
@@ -267,6 +269,11 @@ class TrainingEngine:
                 "n_rxn_targets",
                 "n_preds_per_class",
                 "n_targets_per_class",
+                # Counters — summed across batches, NOT averaged. exact_match_top1
+                # is recomputed below from hits / total.
+                "exact_match_hits",
+                "exact_match_total",
+                "exact_match_top1",
                 # PR-AUC keys are overwritten below with the pooled epoch-level
                 # value (averaging per-batch APs is mathematically invalid).
                 "pr_auc",
@@ -276,6 +283,12 @@ class TrainingEngine:
                     all_metrics[key] = [v / max(num_batches, 1) for v in all_metrics[key]]
                 else:
                     all_metrics[key] /= max(num_batches, 1)
+
+        # Epoch-level exact-match: hits across all batches / total samples.
+        em_total = all_metrics["exact_match_total"]
+        all_metrics["exact_match_top1"] = (
+            all_metrics["exact_match_hits"] / em_total if em_total > 0 else 0.0
+        )
 
         # Epoch-level pooled PR-AUC (correct AP over the concatenated rankings).
         pooled_overall, pooled_per_class = pooled_pr_auc(
@@ -337,6 +350,7 @@ class TrainingEngine:
                 f"Rec: {val_metrics['recall']:.3e} | "
                 f"Prec: {val_metrics['precision']:.3e} | "
                 f"PR-AUC: {val_metrics['pr_auc']:.3e} | "
+                f"EM@1: {val_metrics['exact_match_top1']:.3e} | "
                 f"RxnPreds: {int(val_metrics['n_rxn_preds'])}/{int(val_metrics['n_rxn_targets'])} "
                 f"(TP {int(val_metrics['tp'])} FP {int(val_metrics['fp'])} FN {int(val_metrics['fn'])})"
             )

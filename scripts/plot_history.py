@@ -9,7 +9,7 @@ Usage::
 The input JSON is produced by ``TrainingEngine.save_results()`` and contains
 ``history`` with per-epoch ``train_loss``, ``val_loss``, ``train_metrics``,
 and ``val_metrics`` (each metric dict has ``precision``, ``recall``, ``f1``,
-``pr_auc``, ``topk_acc``, ``tp``, ``fp``, ``fn``, ``n_rxn_preds``,
+``pr_auc``, ``exact_match_top1``, ``tp``, ``fp``, ``fn``, ``n_rxn_preds``,
 ``n_rxn_targets``).
 """
 
@@ -90,13 +90,18 @@ def plot_history(results: dict[str, Any], output_path: Path) -> None:
     ax.grid(True, alpha=0.3)
     ax.legend()
 
-    # --- Panel 3: PR-AUC + top-k acc -------------------------------------
+    # --- Panel 3: PR-AUC + exact-match top-1 -----------------------------
+    # exact_match_top1 (whole-sample Δ-matrix argmax == target) replaced the
+    # old pair-level topk_acc — fall back gracefully for legacy result JSONs
+    # that only have the old key.
     ax = axes[1, 0]
     ax.plot(epochs, _series(val_metrics, "pr_auc"), label="PR-AUC", marker="o", linewidth=1.5)
-    ax.plot(epochs, _series(val_metrics, "topk_acc"), label="top-k acc", marker="s", linewidth=1.5)
+    em_key = "exact_match_top1" if "exact_match_top1" in val_metrics[0] else "topk_acc"
+    em_label = "EM@1 (full Δ-matrix)" if em_key == "exact_match_top1" else "top-k acc (legacy)"
+    ax.plot(epochs, _series(val_metrics, em_key), label=em_label, marker="s", linewidth=1.5)
     ax.set_xlabel("epoch")
     ax.set_ylabel("score")
-    ax.set_title("Validation PR-AUC & top-k accuracy")
+    ax.set_title("Validation PR-AUC & exact-match top-1")
     ax.set_ylim(-0.02, 1.02)
     ax.grid(True, alpha=0.3)
     ax.legend()

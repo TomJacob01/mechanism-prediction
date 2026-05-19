@@ -334,3 +334,96 @@ def test_get_mechanism_metrics_exposes_pooled_buffers_for_epoch_aggregation():
     assert m["_pooled_targets"].numel() == 3
     assert m["_pooled_probs"].shape == (3, C)
     assert m["_pooled_class_targets"].numel() == 3
+
+
+# ---------------------------------------------------------------------------
+# exact_match_top1: whole-sample Δ-matrix top-1 exact-match (PMechDB-style).
+# Replaces the old pair-level topk_acc, which was non-standard and biased low
+# by N (since most pairs are trivially no-change).
+# ---------------------------------------------------------------------------
+
+
+def _perfect_logits(targets: torch.Tensor, num_classes: int) -> torch.Tensor:
+    """Build logits whose argmax equals ``targets`` everywhere."""
+    B, N, _ = targets.shape
+    logits = torch.zeros(B, N, N, num_classes)
+    logits.scatter_(-1, targets.unsqueeze(-1), 10.0)
+    return logits
+
+
+def test_exact_match_top1_all_correct_is_one():
+    """All-correct argmax → EM@1 = 1.0 and hits == total."""
+    B, N, C = 4, 5, 7
+    no_change_idx = C // 2
+    targets = torch.full((B, N, N), no_change_idx, dtype=torch.long)
+    # Sprinkle a few real reactions so the targets are non-trivial.
+    targets[0, 0, 1] = 5
+    targets[1, 2, 3] = 0
+    targets[2, 1, 4] = 6
+    logits = _perfect_logits(targets, C)
+    mask = torch.ones(B, N, dtype=torch.bool)
+
+    m = MetricsComputer.get_mechanism_metrics(logits, targets, mask)
+
+    assert m["exact_match_total"] == B
+    assert m["exact_match_hits"] == B
+    assert math.isclose(m["exact_match_top1"], 1.0, abs_tol=1e-6)
+
+
+def test_exact_match_top1_single_wrong_pair_is_zero_for_that_sample():
+    """One mispredicted pair in a sample disqualifies the whole sample from EM@1."""
+    B, N, C = 1, 4, 7
+    no_change_idx = C // 2
+    targets = torch.full((B, N, N), no_change_idx, dtype=torch.long)
+    targets[0, 0, 1] = 5
+    logits = _perfect_logits(targets, C)
+    # Flip one upper-tri pair's argmax to a wrong class.
+    logits[0, 2, 3, no_change_idx] = 0.0
+    logits[0, 2, 3, 6] = 100.0
+    mask = torch.ones(B, N, dtype=torch.bool)
+
+    m = MetricsComputer.get_mechanism_metrics(logits, targets, mask)
+
+    assert m["exact_match_total"] == 1
+    assert m["exact_match_hits"] == 0
+    assert m["exact_match_top1"] == 0.0
+
+
+def test_exact_match_top1_mixed_batch_ratio():
+    """In a batch of B samples with K perfect predictions, EM@1 = K/B."""
+    B, N, C = 5, 4, 7
+    no_change_idx = C // 2
+    targets = torch.full((B, N, N), no_change_idx, dtype=torch.long)
+    targets[:, 0, 1] = 5  # one real reaction per sample
+    logits = _perfect_logits(targets, C)
+    # Break samples 0 and 3 by flipping one pair each.
+    logits[0, 2, 3, no_change_idx] = 0.0
+    logits[0, 2, 3, 6] = 100.0
+    logits[3, 0, 1, 5] = 0.0
+    logits[3, 0, 1, no_change_idx] = 100.0
+    mask = torch.ones(B, N, dtype=torch.bool)
+
+    m = MetricsComputer.get_mechanism_metrics(logits, targets, mask)
+
+    assert m["exact_match_total"] == B
+    assert m["exact_match_hits"] == 3  # samples 1, 2, 4 perfect
+    assert math.isclose(m["exact_match_top1"], 3 / 5, abs_tol=1e-6)
+
+
+def test_exact_match_top1_skips_samples_with_no_valid_pairs():
+    """Samples masked down to <2 atoms contribute no upper-tri pairs and are excluded."""
+    B, N, C = 2, 4, 7
+    no_change_idx = C // 2
+    targets = torch.full((B, N, N), no_change_idx, dtype=torch.long)
+    targets[0, 0, 1] = 5
+    logits = _perfect_logits(targets, C)
+    mask = torch.ones(B, N, dtype=torch.bool)
+    # Mask sample 1 down to a single atom → 0 upper-tri pairs.
+    mask[1, 1:] = False
+
+    m = MetricsComputer.get_mechanism_metrics(logits, targets, mask)
+
+    # Only sample 0 had any valid pairs, and it was predicted perfectly.
+    assert m["exact_match_total"] == 1
+    assert m["exact_match_hits"] == 1
+    assert math.isclose(m["exact_match_top1"], 1.0, abs_tol=1e-6)

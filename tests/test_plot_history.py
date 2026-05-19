@@ -22,7 +22,7 @@ def _make_history(n_epochs: int = 3) -> dict:
             "recall": 0.05 * epoch,
             "f1": 0.07 * epoch,
             "pr_auc": 0.2 + 0.1 * epoch,
-            "topk_acc": 0.3 + 0.1 * epoch,
+            "exact_match_top1": 0.3 + 0.1 * epoch,
             "tp": 10 * epoch,
             "fp": 100,
             "fn": 50,

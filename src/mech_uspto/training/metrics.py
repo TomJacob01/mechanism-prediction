@@ -45,7 +45,6 @@ def binary_pr_auc(scores: torch.Tensor, targets: torch.Tensor) -> float:
 def _metrics_for_sample(
     mol_logits: torch.Tensor,
     mol_targets: torch.Tensor,
-    k: int,
 ) -> tuple[
     int,
     int,
@@ -62,8 +61,15 @@ def _metrics_for_sample(
 ]:
     """Per-sample reaction-center metrics over upper-triangle pairs.
 
-    Returns ``(tp, fp, fn, n_rxn_preds, topk_hits, total_rxns, scores,
+    Returns ``(tp, fp, fn, n_rxn_preds, exact_match_top1, total_rxns, scores,
     target_bin, probs, targets, n_preds_per_class, n_targets_per_class)``.
+
+    ``exact_match_top1`` is 1 iff ``argmax(logits, dim=-1)`` equals
+    ``mol_targets`` at *every* pair in the sample — i.e., the model's top-1
+    full Δ-matrix exactly matches the ground truth. This is the
+    PMechDB / Bradshaw-2018 mechanism-prediction metric (cf. FUTURE_TASKS #2)
+    and replaces the previous pair-level ``topk_acc`` which was mathematically
+    capped at ~5% in end_to_end mode (~55 reactions per sample / k=3).
 
     The extra last four entries support per-class PR-AUC pooling and the
     "did the model predict this class at all?" diagnostic that distinguishes
@@ -96,14 +102,10 @@ def _metrics_for_sample(
     # silently broken for 7-class (ignored P(Δ=±1) and P(Δ=±2)).
     rxn_scores = 1.0 - probs[:, no_change_idx]
 
-    topk_hits = 0
-    if mol_total_rxns > 0:
-        k_to_use = min(k, len(rxn_scores))
-        _, top_indices = torch.topk(rxn_scores, k_to_use)
-        target_rxn_indices = torch.where(is_rxn_target)[0]
-        for tr_idx in target_rxn_indices:
-            if tr_idx in top_indices:
-                topk_hits += 1
+    # Top-1 exact match: every pair's argmax == target. Whole-sample 0/1.
+    # Top-k for k>1 requires a beam search over candidate Δ-matrices
+    # (Lawler-style heap enumeration) — deferred follow-up to FUTURE_TASKS #2.
+    exact_match_top1 = int((mol_preds == mol_targets).all().item())
 
     # Per-class counters: how many pairs the model assigned to each class, and
     # how many true pairs of each class exist. Lets callers distinguish
@@ -116,7 +118,7 @@ def _metrics_for_sample(
         fp,
         fn,
         n_rxn_preds,
-        topk_hits,
+        exact_match_top1,
         mol_total_rxns,
         rxn_scores.detach(),
         is_rxn_target.detach(),
@@ -135,14 +137,18 @@ class MetricsComputer:
         logits: torch.Tensor,
         targets: torch.Tensor,
         mask: torch.Tensor,
-        k: int = 3,
     ) -> dict[str, float]:
         """Reaction-center metrics over the upper-triangle of each batch sample."""
         B, N, _, num_classes = logits.shape
         mask_2d = mask.unsqueeze(1) * mask.unsqueeze(2)
         triu_indices = torch.triu_indices(N, N, offset=1, device=logits.device)
 
-        tp, fp, fn, n_rxn_preds, topk_hits, total_rxns = 0, 0, 0, 0, 0, 0
+        tp, fp, fn, n_rxn_preds = 0, 0, 0, 0
+        # Whole-sample top-1 Δ-matrix exact-match (PMechDB-style). Accumulator
+        # tracks hits and the number of samples that actually had upper-tri
+        # pairs to score (samples with N≤1 contribute nothing).
+        exact_match_hits, exact_match_total = 0, 0
+        total_rxns = 0
         all_scores: list[torch.Tensor] = []
         all_targets: list[torch.Tensor] = []
         all_probs: list[torch.Tensor] = []
@@ -164,7 +170,7 @@ class MetricsComputer:
                 s_fp,
                 s_fn,
                 s_n_rxn_preds,
-                s_topk,
+                s_exact_match,
                 s_total,
                 s_scores,
                 s_target_bin,
@@ -172,12 +178,13 @@ class MetricsComputer:
                 s_class_targets,
                 s_n_preds,
                 s_n_targets,
-            ) = _metrics_for_sample(mol_logits, mol_targets, k)
+            ) = _metrics_for_sample(mol_logits, mol_targets)
             tp += s_tp
             fp += s_fp
             fn += s_fn
             n_rxn_preds += s_n_rxn_preds
-            topk_hits += s_topk
+            exact_match_hits += s_exact_match
+            exact_match_total += 1
             total_rxns += s_total
             all_scores.append(s_scores)
             all_targets.append(s_target_bin)
@@ -190,7 +197,7 @@ class MetricsComputer:
         precision = tp / (tp + fp + 1e-8)
         recall = tp / (tp + fn + 1e-8)
         f1 = 2 * precision * recall / (precision + recall + 1e-8)
-        topk_acc = topk_hits / (total_rxns + 1e-8)
+        exact_match_top1 = exact_match_hits / exact_match_total if exact_match_total > 0 else 0.0
 
         pr_auc_per_class = [0.0] * num_classes
         if all_scores:
@@ -220,7 +227,9 @@ class MetricsComputer:
             "precision": precision,
             "recall": recall,
             "f1": f1,
-            "topk_acc": topk_acc,
+            "exact_match_top1": exact_match_top1,
+            "exact_match_hits": exact_match_hits,
+            "exact_match_total": exact_match_total,
             "pr_auc": pr_auc,
             "tp": tp,
             "fp": fp,

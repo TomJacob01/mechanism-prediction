@@ -60,9 +60,6 @@ Homepage = "https://github.com/TomJacob01/mechanism-prediction"
 Source = "https://github.com/TomJacob01/mechanism-prediction"
 Issues = "https://github.com/TomJacob01/mechanism-prediction/issues"
 
-[project.scripts]
-mech-uspto-train = "mech_uspto.scripts.train:main"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 

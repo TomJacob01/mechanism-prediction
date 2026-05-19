@@ -7,7 +7,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
 #SBATCH --output=slurm-logs/%x-%j.out
-#SBATCH --error=slurm-logs/%x-%j.err
+#SBATCH --error=slurm-logs/%x-%j.out
 
 # Usage:
 #   sbatch scripts/slurm/train.sbatch [extra train.py args...]
@@ -61,7 +61,7 @@ fi
 # documents the run config in the slurm log AND guards against a future
 # Config edit silently changing what this sbatch ships.
 if [[ "$TASK_MODE" == "end_to_end" && "$*" != *"--class-weights"* ]]; then
-    set -- "$@" --class-weights "1,1.5,3,1,3,1.5,1"
+    set -- "$@" --class-weights "1,1.5,3,1,5,1.5,1"
 fi
 if [[ "$*" != *"--warmup-steps"* ]]; then
     set -- "$@" --warmup-steps "130"

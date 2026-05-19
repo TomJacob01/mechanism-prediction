@@ -10,7 +10,7 @@ Usage::
         --output results/eval.json --confusion-csv results/confusion.csv
 
 Saves:
-- A JSON with aggregate metrics (precision, recall, f1, pr_auc, topk_acc,
+- A JSON with aggregate metrics (precision, recall, f1, pr_auc, exact_match_top1,
   per-class counts, n_rxn_preds, n_rxn_targets, confusion matrix).
 - An optional CSV with the raw confusion matrix (rows=true, cols=pred,
   classes indexed 0..num_classes-1 corresponding to shifted Δ values).
@@ -59,6 +59,8 @@ def build_model_from_config(config: Config, device: torch.device) -> ReactionTra
         num_layers=config.num_layers,
         dropout=config.dropout,
         num_classes=config.num_classes,
+        class_prior=config.class_prior,
+        use_edge_features_in_head=config.use_edge_features_in_head,
     ).to(device)
     return model
 
@@ -84,7 +86,8 @@ def evaluate_split(
     confusion = np.zeros((num_classes, num_classes), dtype=np.int64)
 
     tp = fp = fn = n_rxn_preds = n_rxn_targets = 0
-    total_topk_hits = 0
+    em_hits = 0  # whole-sample top-1 Δ-matrix exact-match count
+    em_total = 0  # samples scored
     total_loss_weight = 0  # number of batches successfully processed
     pr_auc_running: list[float] = []  # per-batch PR-AUC, averaged at the end
 
@@ -105,7 +108,8 @@ def evaluate_split(
         fn += int(bm["fn"])
         n_rxn_preds += int(bm["n_rxn_preds"])
         n_rxn_targets += int(bm["n_rxn_targets"])
-        total_topk_hits += int(bm["topk_acc"] * bm["n_rxn_targets"])
+        em_hits += int(bm["exact_match_hits"])
+        em_total += int(bm["exact_match_total"])
         pr_auc_running.append(float(bm["pr_auc"]))
         total_loss_weight += 1
 
@@ -126,7 +130,7 @@ def evaluate_split(
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
     pr_auc = float(np.mean(pr_auc_running)) if pr_auc_running else 0.0
-    topk_acc = total_topk_hits / n_rxn_targets if n_rxn_targets > 0 else 0.0
+    exact_match_top1 = em_hits / em_total if em_total > 0 else 0.0
 
     # Per-class precision / recall / F1 derived from the confusion matrix.
     per_class = {}
@@ -152,7 +156,9 @@ def evaluate_split(
         "recall": recall,
         "f1": f1,
         "pr_auc": pr_auc,
-        "topk_acc": topk_acc,
+        "exact_match_top1": exact_match_top1,
+        "exact_match_hits": em_hits,
+        "exact_match_total": em_total,
         "tp": tp,
         "fp": fp,
         "fn": fn,
@@ -264,7 +270,10 @@ def main() -> None:
     print(f"  Precision    : {metrics['precision']:.4f}")
     print(f"  Recall       : {metrics['recall']:.4f}")
     print(f"  PR-AUC (avg) : {metrics['pr_auc']:.4f}")
-    print(f"  Top-k acc    : {metrics['topk_acc']:.4f}")
+    print(
+        f"  EM@1 (full Δ): {metrics['exact_match_top1']:.4f}  "
+        f"({metrics['exact_match_hits']:,}/{metrics['exact_match_total']:,} samples)"
+    )
     print(f"  TP / FP / FN : {metrics['tp']:,} / {metrics['fp']:,} / {metrics['fn']:,}")
     print(f"  RxnPreds     : {metrics['n_rxn_preds']:,} / {metrics['n_rxn_targets']:,}")
     print("\nPer-class:")

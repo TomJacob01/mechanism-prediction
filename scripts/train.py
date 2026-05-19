@@ -6,6 +6,8 @@ Usage::
     python scripts/train.py --task-mode end_to_end --batch-size 16
 """
 
+print("↑ Python started, importing dependencies (torch/pyg/rdkit ≈ 5–15s)...", flush=True)
+
 import argparse
 
 import torch
@@ -14,6 +16,8 @@ from mech_uspto.data.loaders import create_dataloaders, seed_everything
 from mech_uspto.training.config import DEFAULT_DATA_PATH, Config
 from mech_uspto.training.engine import TrainingEngine
 from mech_uspto.training.tracking import make_tracker
+
+print(f"↓ Imports done. torch {torch.__version__}, CUDA available: {torch.cuda.is_available()}", flush=True)
 
 
 def parse_args() -> argparse.Namespace:

@@ -8,18 +8,12 @@ notebook into an installable Python package.
 ## Research design
 
 **Question.** Can a graph transformer learn multi-step chemistry without ever
-seeing the intermediate states?
+seeing the intermediate states? Two training modes (stepwise vs. end-to-end)
+target the same forward operator at different time scales, sharing the same
+model code and differing only in supervision signal.
 
-| Aspect              | Stepwise (micro)                       | End-to-end (macro)                    |
-| ------------------- | -------------------------------------- | ------------------------------------- |
-| Training data       | Each elementary step ``S_i → S_{i+1}`` | Full reaction ``S_0 → S_final``       |
-| Target Δ range      | ``{-1, 0, 1}``                         | ``{-2, -1, 0, 1, 2}``                 |
-| Classification head | 3-class                                | 5-class                               |
-| Inference           | Autoregressive rollout                 | Single-shot                           |
-| Chemical principle  | Step-by-step                           | Implicit "chemical teleportation"     |
-
-**Headline metric.** Final Product Recovery (FPR): fraction of reactions whose
-predicted final adjacency matrix matches the ground truth.
+Full framing, architecture, loss, metrics, and design rationale: see
+[MODEL.md](MODEL.md). Open work: [FUTURE_TASKS.md](FUTURE_TASKS.md).
 
 ---
 
@@ -82,121 +76,27 @@ variable, falling back to `./data/mech-USPTO-31k`. Override with
 ## Package layout
 
 ```
-src/mech_uspto/
-├── constants.py             # ALLOWED_ELEMENTS, bond types, feature widths
-├── data/
-│   ├── schema.py            # ReactionStep, MultiStepReaction
-│   ├── parser.py            # MechUSPTOParser
-│   ├── featurization.py     # one_hot_encode, featurize_nodes/edges, process_mapped_smiles
-│   ├── transformations.py   # DeltaMatrixGenerator
-│   ├── spectators.py        # SpectatorDetector
-│   ├── dataset.py           # MechUSPTODataset
-│   └── loaders.py           # collate_fn_with_spectators, create_dataloaders
-├── models/
-│   ├── heads.py             # DeltaMLP (3- or 5-class)
-│   └── transformer.py       # ReactionTransformer (TransformerConv encoder + head)
-├── losses/
-│   └── focal.py             # MaskedFocalLossWithSpectators
-└── training/
-    ├── config.py            # Config dataclass
-    ├── metrics.py           # MetricsComputer + per-sample helper
-    └── engine.py            # TrainingEngine
-
-scripts/train.py             # CLI entrypoint (argparse + main)
-tests/                       # pytest suite + fixtures
-legacy/PmechDB_POC.ipynb     # archived original notebook
+src/mech_uspto/{constants,data,models,losses,training}
+scripts/{train,evaluate,sanity_check,plot_history}.py
+tests/                  # pytest suite + fixtures
+legacy/PmechDB_POC.ipynb
 ```
 
-The public API is re-exported from the top-level package, so consumer code
-can keep importing from `mech_uspto`:
+Public API is re-exported from the top-level package:
 
 ```python
 from mech_uspto import (
-    MechUSPTOParser,
-    MechUSPTODataset,
-    create_dataloaders,
-    DeltaMLP,
-    ReactionTransformer,
-    MaskedFocalLossWithSpectators,
+    MechUSPTOParser, MechUSPTODataset, create_dataloaders,
+    DeltaMLP, ReactionTransformer, MaskedFocalLossWithSpectators,
 )
 ```
 
----
-
-## Data format
-
-Each reaction is one JSON file:
-
-```json
-{
-    "rxn_id": "rxn_0001",
-    "steps": [
-        {
-            "id": 0,
-            "reactants": "SMILES",
-            "products": "SMILES",
-            "reactants_mapped": "atom-mapped SMILES",
-            "products_mapped": "atom-mapped SMILES",
-            "mechanism": "label or arrow code"
-        }
-    ],
-    "overall_reactants": "SMILES",
-    "overall_products": "SMILES",
-    "metadata": {"...": "..."}
-}
-```
-
-Featurization produces 25-dim node features and 6-dim edge features (see
-`mech_uspto.constants`). Targets are bond-order Δ matrices of shape
-`(N, N)` per sample, padded to `(B, N_max, N_max)` at collation time and
-shifted to non-negative class indices inside the training engine.
-
----
-
-## Key design decisions
-
-1. **Spectator downweighting (not masking).** ~95% of USPTO atoms are
-   spectators. Zeroing them out destroys global graph signal, so the loss
-   downweights them by `0.1` instead — see `MaskedFocalLossWithSpectators`.
-2. **Symmetric Δ predictions.** Bond formation is symmetric (`A-B == B-A`),
-   so the head averages `logits[i, j]` and `logits[j, i]`.
-3. **Reactants-only inputs.** Both modes feed the encoder the *reactant*
-   side (`S_i` for stepwise, `S_0` for end-to-end) — the model is never
-   shown products at training time.
-
----
-
-## Performance expectations (rough, from the original POC)
-
-| Mode       | Final F1 | Final FPR  |
-| ---------- | -------- | ---------- |
-| Stepwise   | ~0.85    | 70–85 %    |
-| End-to-end | ~0.70    | 40–60 %    |
-
-End-to-end converges more slowly but tests whether the model can implicitly
-learn intermediate states.
+Per-module breakdown and architecture details: [MODEL.md](MODEL.md).
+Data format and how to obtain it: [DATA.md](DATA.md).
 
 ---
 
 ## Cluster deployment
 
-The training script is GPU-agnostic and runs on any single-node CUDA setup
-(e.g. an 8× A100 partition). For SLURM submission, mirror the data layout
-in `DATA.md` and point `MECH_USPTO_DATA` at it.
-
----
-
-## Status & follow-ups
-
-This README replaces the previous `INDEX.md`, `MIGRATION_README.md` and
-`SUMMARY.py`, which are no longer maintained. The original PMechDB POC
-notebook is preserved at `legacy/PmechDB_POC.ipynb` for reference.
-
-Known follow-ups (out of scope for this refactor):
-
-- Replace broad `except Exception` blocks with specific exceptions, and tally
-  dropped samples in dataset construction.
-- Replace `print` + emoji output with the `logging` module.
-- Add an end-to-end integration test on a tiny synthetic dataset.
-- Implement an autoregressive inference loop for stepwise mode and an FPR
-  evaluation script.
+Training is GPU-agnostic and runs on any single-node CUDA setup.
+SLURM submission workflow + sync setup: [CLUSTER_SETUP.md](CLUSTER_SETUP.md).
