@@ -33,6 +33,14 @@ set -u
 
 cd ~/projects/mechanism-prediction
 
+# Expandable-segments allocator: lets PyTorch grow CUDA memory segments
+# contiguously instead of pinning fixed pools. Required for graph batches
+# with high N variance — fixed allocator fragments 30+ GB of cached memory
+# into unusable chunks and OOMs on the next big tensor request (observed
+# epoch 2 of job 68210046, May 2026: 9.8 GB allocated + 28 GB reserved but
+# fragmented; needed an 18 GB contiguous block). Cost: trivial.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # --- Default args (overridable from CLI) -----------------------------------
 CSV_DEFAULT=/home/tom-jacob/data/mech-USPTO-31k/mech-USPTO-31k.csv
 

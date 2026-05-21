@@ -16,12 +16,13 @@ def test_stepwise_dataset_builds(stepwise_dataset):
     assert sample.spectator_mask.shape[0] == sample.x.shape[0]
 
 
-@pytest.mark.xfail(
-    reason="Real CSV rows are full multi-step reactions; stepwise Δ ∈ [-1,1] "
-    "will only hold after the parser decomposes mechanistic_label into elementary steps.",
-    strict=True,
-)
 def test_stepwise_delta_in_unit_range(stepwise_dataset):
+    # Note: this now holds even for full multi-step CSV rows because
+    # ``delta_from_reactants_products`` zeroes bonds internal to non-shared
+    # atoms (leaving groups / reagents), so the only non-zero entries are the
+    # actual bond changes on the productive subgraph. End-to-end rxns may
+    # still have Δ=±2 on the productive part; this fixture happens to be
+    # within unit range.
     sample = stepwise_dataset[0]
     assert sample.y.min().item() >= -1
     assert sample.y.max().item() <= 1

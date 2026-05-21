@@ -18,6 +18,7 @@ Backlog **not** in the current refactor. Legend: 🔴 blocker · 🟡 important 
 | H1  | 🟢  | Biaffine head                                          | ~3 h    | `models/heads.py`, `models/transformer.py`, config                                     |
 | H2  | 🟢  | Two-stage head (detection + classification)            | ~half d | `models/heads.py`, `losses/focal.py`, `engine.py`                                      |
 | H3  | 🟢  | Dropout ablation (rate × placement)                    | ~2 h    | `models/transformer.py`, `models/heads.py`, sweep config                               |
+| H4  | 🟢  | Atom-pair priors in head (graph-distance, etc.)        | ~half d | `data/featurization.py`, `models/heads.py`, `models/transformer.py`                    |
 | 3   | 🟢  | Hyperparameter sweep config                            | ~2 h    | new `sweeps/*.yaml` (after H1/H2 settled)                                              |
 
 ---
@@ -105,6 +106,24 @@ Observed consequence: train metrics are ~half of val metrics across the entire r
 4 × 2 = 8 runs. Primary signal: best val F1 / EM@1 / PR-AUC per cell. Secondary: the train-vs-val gap closes monotonically as dropout shrinks (sanity check that the mechanism is what we think it is).
 
 **Currently working without it.** Don't run standalone — fold into #3's HP sweep. Val loss is currently *below* train loss and val F1 is still rising at ep 10, so dropout is doing useful regularization for now. Only revisit if val F1 plateaus.
+
+### #H4 Atom-pair priors in head
+
+Motivated by the per-class PR-AUC asymmetry observed in run 68210060: c2 (bond breaking) reaches PR-AUC ≈ 0.98 while c4 (bond formation) sits at 0.14 (≈15× prevalence-baseline lift, vs. ≈65× for c2). The two classes share an architecture but not an input-feature regime: `featurize_edges` only emits non-zero edge features for **existing** RDKit bonds, so the head's `edge_dense[B, N, N, 6]` slot for any non-bonded pair `(i, j)` is all zeros. c2 gets a full bond-type one-hot at the head; c4 gets nothing and has to discover "these atoms want to bond" through node embeddings alone. Deeper encoders (more `TransformerConv` layers) is the brute-force lever — same input, more rounds of message passing — and saturates fast (over-smoothing past 6–8 layers). Atom-pair priors is the structural lever: explicit pair features for *all* `(i, j)`, including non-bonded.
+
+Three tiers, each subsuming the prior:
+
+1. **Graph shortest-path distance (cheapest, recommended first attempt).** For each `(i, j)`, BFS hops along the reactant-bond graph, clipped at e.g. 6, encoded one-hot to `(N, N, 7)`. Pure topology, no 3D, no chemistry knowledge. Compute once at dataset-build time via `Chem.GetDistanceMatrix(mol)` (RDKit, fast) and cache alongside the existing graph data. Concatenate into `edge_dense` before passing to `DeltaMLP`. Expected gain on c4: 2–3× PR-AUC lift (rough estimate based on similar augmentations in pair-scoring literature). Does not help c2 (already feature-rich). Single-feature ablation; easy to reverse.
+2. **Atom-pair chemical priors.** Per-pair scalars derivable from per-atom RDKit properties: electronegativity difference, formal-charge sum, lone-pair-count product (proxy for nucleophile×electrophile), HOMO/LUMO proxies (e.g. "is i sp³ with lone pair, j sp² with empty p?"), shared-ring indicator. ≈10 features. Same plumbing as #1.
+3. **3D Euclidean distance.** Embed each reactant with `EmbedMolecule + MMFFOptimizeMolecule`, store coordinates, compute pairwise distance at dataset-build time. Single scalar per pair. Adds ~100–500ms per molecule once (cached), and exposes the model to actual geometry. Most informative; most cost; hardest to make robust (some molecules fail to embed).
+
+**Plumbing.** All three flow through the same hook: extend `ReactionTransformer.forward` to densify a per-batch `pair_features` tensor `(B, N, N, k)` and concatenate it onto `edge_dense` before the `DeltaMLP` call. `DeltaMLP.__init__` already takes `edge_dim` as a constructor arg — just bump it by `k`. No new module needed for #1; #2 and #3 want a `data/pair_features.py` module to keep the per-pair logic out of `featurization.py`.
+
+**Gate.** `Config.pair_features ` accepts a list of strings, e.g. `["graph_distance"]`, `["graph_distance", "chemical_prior"]`, `["graph_distance", "chemical_prior", "euclidean"]`. Default `[]` preserves current behaviour.
+
+**When to try.** Only after the rollout work (#1) is unblocked. The pair-prior change is purely additive and orthogonal to the rollout pipeline, so it can run in parallel as a separate experiment, but the headline metric is product-top-k from #2, and there's no point tuning encoder features until rollout is producing a usable end-to-end signal.
+
+**Test.** `pair_features=["graph_distance"]` on a known 4-atom fixture (linear chain) produces the expected distance-matrix one-hot. Forward pass shape unchanged at the head output `(B, N, N, C)`. Concat dimension matches `edge_in + 7` in the head's first linear.
 
 ### #3 HP sweep
 

@@ -12,16 +12,7 @@ from mech_uspto.models.transformer import ReactionTransformer
 @pytest.mark.parametrize(
     "task_mode, num_classes, shift",
     [
-        pytest.param(
-            "stepwise",
-            3,
-            1,
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason="Parser does not yet decompose multi-step rxns into "
-                "elementary steps; fixture has Δ=-2 which is out of stepwise range.",
-            ),
-        ),
+        ("stepwise", 3, 1),
         ("end_to_end", 7, 3),
     ],
 )
