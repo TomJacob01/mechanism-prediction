@@ -106,6 +106,22 @@ def apply_delta(
     # prediction would silently strip input chirality.
     input_chiral_tags = {a.GetIdx(): a.GetChiralTag() for a in rw.GetAtoms()}
 
+    # Also snapshot the multiset of neighbour atomic numbers per atom. After
+    # surgery we use this to decide whether a touched atom's chirality tag
+    # should be PRESERVED (element multiset unchanged → CIP priorities at
+    # that centre likely still resolve the same way; SMILES ``@``/``@@``
+    # parity is invariant under bond-order changes that don't add/remove a
+    # substituent element) or BLANKED (element multiset changed → CIP
+    # priorities may have reshuffled and the original tag is unreliable).
+    # This recovers chirality across reactions like Mitsunobu, where the
+    # ``[C@@H]`` tag persists but the CIP code flips because the new
+    # substituent (OAr) outranks the old (OH) — sanitize handles the flip
+    # automatically when we preserve the parity tag.
+    input_neighbor_elems = {
+        a.GetIdx(): sorted(n.GetAtomicNum() for n in a.GetNeighbors())
+        for a in rw.GetAtoms()
+    }
+
     # Walk strictly upper-triangular off-diagonal entries.
     # Round to nearest int — accept float tensors from model outputs.
     delta_int = delta.round().to(torch.int64)
@@ -207,27 +223,36 @@ def apply_delta(
         except Exception as e:
             raise ApplyDeltaError("sanitize_failed", str(e)) from e
 
-    # Restore chiral tags on stereocenters whose neighbour set is unchanged.
-    # An atom is "untouched" iff none of its incident bonds were modified by
-    # the Δ; for such atoms the original ChiralTag is still semantically valid
-    # but may have been flipped/cleared during sanitize or RWMol bookkeeping.
-    for idx, tag in input_chiral_tags.items():
-        if tag == Chem.ChiralType.CHI_UNSPECIFIED:
+    # Stereo handling, post-sanitize. Three cases per atom:
+    #   1. Untouched stereocentre → restore the snapshot tag verbatim
+    #      (sanitize / RWMol bookkeeping may have flipped or dropped it).
+    #   2. Touched stereocentre with neighbour ELEMENT multiset unchanged
+    #      → restore the snapshot tag. The CIP descriptor (R/S) is recomputed
+    #      by RDKit from the new neighbour priorities, so the tag transfers
+    #      cleanly: Mitsunobu-style inversion is captured automatically when
+    #      a new substituent of the same element outranks the old one.
+    #   3. Touched stereocentre with neighbour element multiset CHANGED
+    #      → blank to UNSPECIFIED. The bond-order Δ alone cannot determine
+    #      stereo at a centre whose substituent set has fundamentally
+    #      changed (e.g. sp²→sp³ where a new substituent is added).
+    for idx, original_tag in input_chiral_tags.items():
+        if original_tag == Chem.ChiralType.CHI_UNSPECIFIED:
             continue
-        if idx in touched_atoms:
+        atom = rw.GetAtomWithIdx(idx)
+        if idx not in touched_atoms:
+            atom.SetChiralTag(original_tag)
             continue
-        rw.GetAtomWithIdx(idx).SetChiralTag(tag)
+        post_elems = sorted(n.GetAtomicNum() for n in atom.GetNeighbors())
+        if post_elems == input_neighbor_elems[idx]:
+            atom.SetChiralTag(original_tag)
+        else:
+            atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
 
-    # For TOUCHED atoms / bonds, explicitly mark stereo as UNSPECIFIED.
-    # Rationale: bond-order Δ cannot determine R/S for a newly-formed
-    # stereocentre (sp²→sp³) or E/Z for a newly-formed double bond — that
-    # info lives in 3D transition-state geometry / catalyst / conditions
-    # which are absent from the input. Leaving sanitize's "best guess"
-    # produces a specific-but-wrong stereo label (e.g. picking one
-    # enantiomer of a racemic mixture). UNSPECIFIED is the chemically honest
-    # answer and prevents the model from emitting confidently-wrong stereo.
-    for idx in touched_atoms:
-        rw.GetAtomWithIdx(idx).SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+    # Bond stereo on bonds incident to a touched atom: blank.
+    # E/Z geometry on a newly-formed (or order-changed) double bond cannot be
+    # determined from bond-order Δ alone — that lives in 3D transition-state
+    # geometry. Leaving sanitize's best guess produces a confidently-wrong
+    # label; UNSPECIFIED is the honest answer.
     for bond in rw.GetBonds():
         if (
             bond.GetBeginAtomIdx() in touched_atoms

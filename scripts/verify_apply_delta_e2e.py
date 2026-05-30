@@ -67,6 +67,57 @@ def _canon_no_maps_no_stereo(mol: Chem.Mol) -> str:
     return Chem.MolToSmiles(m, isomericSmiles=False)
 
 
+def _canon_strip_unrecoverable(mol: Chem.Mol, r_mol: Chem.Mol) -> str:
+    """Canonical SMILES with stereo descriptors stripped at every position
+    where ``r_mol`` has no stereo annotation either.
+
+    Rationale: the dataset is internally inconsistent — for ~5% of reactions
+    the patent's product SMILES records chirality on atoms / bonds whose
+    *reactant* SMILES has no stereo marker at all. apply_delta cannot
+    conjure stereo that isn't in the input; counting these as failures
+    inflates the strict-error rate with dataset annotation gaps rather than
+    model / algorithm errors.
+
+    This metric strips chirality on any atom whose R-side counterpart (matched
+    by atom-map number) has ``CHI_UNSPECIFIED``, and bond-stereo on any bond
+    whose R-side counterpart has ``STEREONONE`` or doesn't exist in R.
+    Comparing ``_canon_strip_unrecoverable(pred, r)`` to
+    ``_canon_strip_unrecoverable(true, r)`` yields ``pass_rate_recoverable``:
+    "did pred match true on everything that was knowable from R?"
+    """
+    r_chir = {
+        a.GetAtomMapNum(): a.GetChiralTag()
+        for a in r_mol.GetAtoms()
+        if a.GetAtomMapNum() > 0
+    }
+    r_bonds: dict[tuple[int, int], Chem.BondStereo] = {}
+    for b in r_mol.GetBonds():
+        m1 = b.GetBeginAtom().GetAtomMapNum()
+        m2 = b.GetEndAtom().GetAtomMapNum()
+        if m1 > 0 and m2 > 0:
+            r_bonds[tuple(sorted((m1, m2)))] = b.GetStereo()
+
+    m = Chem.Mol(mol)
+    for a in m.GetAtoms():
+        mn = a.GetAtomMapNum()
+        if mn > 0 and r_chir.get(mn, Chem.ChiralType.CHI_UNSPECIFIED) == Chem.ChiralType.CHI_UNSPECIFIED:
+            a.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+    for b in m.GetBonds():
+        m1 = b.GetBeginAtom().GetAtomMapNum()
+        m2 = b.GetEndAtom().GetAtomMapNum()
+        if m1 > 0 and m2 > 0:
+            key = tuple(sorted((m1, m2)))
+            if r_bonds.get(key, Chem.BondStereo.STEREONONE) == Chem.BondStereo.STEREONONE:
+                b.SetStereo(Chem.BondStereo.STEREONONE)
+    for a in m.GetAtoms():
+        a.SetAtomMapNum(0)
+    # Round-trip via SMILES to clear stale BondDir flags on single bonds
+    # adjacent to a double bond whose stereo we just blanked.
+    smi = Chem.MolToSmiles(m)
+    rt = Chem.MolFromSmiles(smi)
+    return Chem.MolToSmiles(rt) if rt is not None else smi
+
+
 def _extract_productive_fragments(
     out_mol: Chem.Mol, productive_maps: set[int]
 ) -> Chem.Mol | None:
@@ -156,6 +207,17 @@ def _analyse_reaction(rxn) -> dict:
     true_canon = _canon_no_maps(p_mol)
     if pred_canon == true_canon:
         return {"status": "ok"}
+    # Try the "recoverable" comparison: ignore stereo at positions where
+    # the dataset's R-side has no annotation either (~75% of strict misses
+    # in the 200-rxn investigation were dataset gaps, not algorithm errors).
+    pred_recov = _canon_strip_unrecoverable(pred_productive, r_mol)
+    true_recov = _canon_strip_unrecoverable(p_mol, r_mol)
+    if pred_recov == true_recov:
+        return {
+            "status": "ok_recoverable",
+            "pred": pred_canon,
+            "true": true_canon,
+        }
     # Re-compare ignoring all stereo descriptors. apply_delta deliberately
     # leaves new stereocentres / new double-bond geometry as UNSPECIFIED
     # because bond-order Δ cannot determine them. A "stereo_only" mismatch
@@ -248,9 +310,13 @@ def main() -> None:
 
     total = sum(status_counts.values())
     n_ok = status_counts["ok"]
+    n_recoverable = status_counts.get("ok_recoverable", 0)
     n_stereo_only = status_counts.get("stereo_only_mismatch", 0)
     pass_rate = n_ok / total if total else 0.0
-    pass_rate_stereo_blind = (n_ok + n_stereo_only) / total if total else 0.0
+    pass_rate_recoverable = (n_ok + n_recoverable) / total if total else 0.0
+    pass_rate_stereo_blind = (
+        (n_ok + n_recoverable + n_stereo_only) / total if total else 0.0
+    )
 
     # Per-class pass rate (sorted by count, then accuracy).
     class_summary = {}
@@ -267,6 +333,7 @@ def main() -> None:
         "n_total": total,
         "n_ok": n_ok,
         "pass_rate": pass_rate,
+        "pass_rate_recoverable": pass_rate_recoverable,
         "pass_rate_stereo_blind": pass_rate_stereo_blind,
         "status_counts": dict(status_counts),
         "top_failure_reasons": dict(failure_reasons.most_common(20)),
@@ -288,8 +355,13 @@ def main() -> None:
     print(f"Total reactions:  {total:,}")
     print(f"Passed (ok):      {n_ok:,}  ({pass_rate:6.2%})")
     print(
-        f"Stereo-blind ok:  {n_ok + n_stereo_only:,}  "
-        f"({pass_rate_stereo_blind:6.2%})  (ignoring R/S, E/Z descriptors)"
+        f"Recoverable ok:   {n_ok + n_recoverable:,}  "
+        f"({pass_rate_recoverable:6.2%})  "
+        f"(ignoring stereo at positions R-side doesn't annotate)"
+    )
+    print(
+        f"Stereo-blind ok:  {n_ok + n_recoverable + n_stereo_only:,}  "
+        f"({pass_rate_stereo_blind:6.2%})  (ignoring ALL stereo)"
     )
     print()
     print("Status breakdown:")
@@ -315,22 +387,22 @@ def main() -> None:
     print()
     print("Decision gate:")
     print(
-        "  (stereo-blind is the meaningful metric — bond-Δ cannot recover "
-        "new stereocentres)"
+        "  (recoverable is the chemistry-honest metric — it excludes "
+        "stereo positions the dataset doesn't annotate in R)"
     )
-    if pass_rate_stereo_blind >= 0.90:
+    if pass_rate_recoverable >= 0.95:
         print(
-            f"  ✅ stereo-blind pass rate {pass_rate_stereo_blind:.2%} ≥ 90% — "
+            f"  ✅ recoverable pass rate {pass_rate_recoverable:.2%} ≥ 95% — "
             "bond-Δ formulation is sound."
         )
-    elif pass_rate_stereo_blind >= 0.60:
+    elif pass_rate_recoverable >= 0.80:
         print(
-            f"  ⚠️  stereo-blind pass rate {pass_rate_stereo_blind:.2%} in "
-            "[60%, 90%) — investigate failure modes."
+            f"  ⚠️  recoverable pass rate {pass_rate_recoverable:.2%} in "
+            "[80%, 95%) — investigate failure modes."
         )
     else:
         print(
-            f"  ❌ stereo-blind pass rate {pass_rate_stereo_blind:.2%} < 60% — "
+            f"  ❌ recoverable pass rate {pass_rate_recoverable:.2%} < 80% — "
             "reconsider formulation."
         )
 
