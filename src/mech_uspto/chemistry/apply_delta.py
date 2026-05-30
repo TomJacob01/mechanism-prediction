@@ -56,6 +56,7 @@ def apply_delta(
     mol: Chem.Mol,
     delta: torch.Tensor,
     *,
+    charge_delta: torch.Tensor | None = None,
     apply_charge_heuristic: bool = True,
 ) -> Chem.Mol:
     """Return a new ``Mol`` with ``delta`` applied to ``mol``'s bond orders.
@@ -64,8 +65,16 @@ def apply_delta(
         mol: Input molecule. Atom-map numbers are preserved on output.
         delta: Square tensor (N, N) where N >= mol.GetNumAtoms(). Off-diagonal
             entries are bond-order deltas; diagonal entries are ignored.
-        apply_charge_heuristic: If True, set each atom's formal charge to
-            ``fc_in[i] + (−Σⱼ delta_off_diag[i,j])``. See module docstring.
+        charge_delta: Optional 1-D tensor of per-atom formal-charge deltas
+            (length >= mol.GetNumAtoms()). When provided, ``charge_delta[i]``
+            is *added* to atom ``i``'s formal charge before sanitize, and the
+            row-sum heuristic is suppressed regardless of
+            ``apply_charge_heuristic``. Used by the e2e verifier with
+            ground-truth Δq computed from R vs P, and by the future
+            diagonal-Δ head at inference time.
+        apply_charge_heuristic: If True and ``charge_delta is None``, set each
+            atom's formal charge to ``fc_in[i] + (−Σⱼ delta_off_diag[i,j])``.
+            Ignored when ``charge_delta`` is supplied.
 
     Raises:
         ApplyDeltaError: on shape mismatch, invalid resulting bond order,
@@ -134,7 +143,7 @@ def apply_delta(
             else:
                 bond.SetBondType(_BOND_ORDER_TO_TYPE[new_order])
 
-    if apply_charge_heuristic:
+    if apply_charge_heuristic and charge_delta is None:
         # Off-diagonal row sum per atom (lower + upper since delta is
         # expected symmetric; use the full matrix and zero the diagonal).
         off_diag = delta_int[:n_mol, :n_mol].clone()
@@ -144,6 +153,25 @@ def apply_delta(
             shift = int(dq[i])
             if shift != 0:
                 atom.SetFormalCharge(atom.GetFormalCharge() + shift)
+
+    if charge_delta is not None:
+        # Explicit per-atom Δq (overrides the heuristic). The dataset is
+        # 99.95% Δq=0 on shared atoms (charge_diagnostic.py) but the residual
+        # 0.05% are real and break sanitize otherwise — e.g. azide
+        # [N⁻]=[N⁺]=[N⁻] adding to an electrophile neutralises to [N⁻]−N=N
+        # (Δq on the central N goes -1, on the terminal N goes +1).
+        if charge_delta.ndim != 1 or charge_delta.shape[0] < n_mol:
+            raise ApplyDeltaError(
+                "shape_mismatch",
+                f"charge_delta must be 1-D length >= {n_mol}, "
+                f"got shape {tuple(charge_delta.shape)}",
+            )
+        dq_int = charge_delta.round().to(torch.int64).tolist()
+        for i, atom in enumerate(rw.GetAtoms()):
+            shift = int(dq_int[i])
+            if shift != 0:
+                atom.SetFormalCharge(atom.GetFormalCharge() + shift)
+                touched_atoms.add(i)
 
     # Hand H bookkeeping back to RDKit for any atom we touched, so sanitize
     # can re-derive implicit H counts from the new valence + formal charge.

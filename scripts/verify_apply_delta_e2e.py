@@ -31,6 +31,7 @@ from pathlib import Path
 
 from rdkit import Chem, RDLogger
 from tqdm.auto import tqdm
+import torch
 
 from mech_uspto.chemistry import ApplyDeltaError, apply_delta
 from mech_uspto.data.featurization import align_atoms
@@ -54,15 +55,16 @@ def _canon_no_maps_no_stereo(mol: Chem.Mol) -> str:
     stereo on newly-formed centres / bonds, so comparing the heavy-atom
     skeleton ignoring stereo isolates whether the *chemistry* (connectivity,
     aromaticity, charges) is correct independent of stereo prediction.
+
+    Uses ``isomericSmiles=False`` to strip *every* stereo descriptor at the
+    output level — ChiralTag, BondStereo, AND BondDir (the ``/``/``\\`` on
+    single bonds adjacent to a double bond, which ``SetStereo(STEREONONE)``
+    alone does NOT clear).
     """
     m = Chem.Mol(mol)
     for a in m.GetAtoms():
         a.SetAtomMapNum(0)
-        a.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-    for b in m.GetBonds():
-        if b.GetStereo() != Chem.BondStereo.STEREONONE:
-            b.SetStereo(Chem.BondStereo.STEREONONE)
-    return Chem.MolToSmiles(m)
+    return Chem.MolToSmiles(m, isomericSmiles=False)
 
 
 def _extract_productive_fragments(
@@ -111,12 +113,30 @@ def _analyse_reaction(rxn) -> dict:
     except Exception as e:
         return {"status": "delta_failed", "reason": repr(e)}
 
+    # Ground-truth diagonal Δ (formal-charge change per shared atom). The
+    # verifier knows P, so we feed the exact Δq into apply_delta instead of
+    # relying on the row-sum heuristic. This handles the 0.05% of atoms
+    # (e.g. azide central N) where Δq ≠ 0 — necessary to reach a true
+    # ceiling on bond-Δ pass rate. The future inference-time path will
+    # consume a *predicted* Δq vector from a diagonal head.
+    p_map_to_charge = {
+        a.GetAtomMapNum(): a.GetFormalCharge()
+        for a in p_mol.GetAtoms()
+        if a.GetAtomMapNum() > 0
+    }
+    charge_delta = torch.zeros(r_mol.GetNumAtoms(), dtype=torch.int64)
+    for idx, a in enumerate(r_mol.GetAtoms()):
+        m = a.GetAtomMapNum()
+        if m in p_map_to_charge:
+            charge_delta[idx] = p_map_to_charge[m] - a.GetFormalCharge()
+
     try:
-        # Charge heuristic disabled: the dataset is 99.95% Δq=0 on shared
-        # atoms (see scripts/charge_diagnostic.py), and the heuristic
-        # mispredicts atoms whose H source is an off-shell reagent (e.g.
-        # carbonyl reduction's hydride / proton donors at map ≥301).
-        out_mol = apply_delta(r_mol, delta, apply_charge_heuristic=False)
+        out_mol = apply_delta(
+            r_mol,
+            delta,
+            charge_delta=charge_delta,
+            apply_charge_heuristic=False,
+        )
     except ApplyDeltaError as e:
         return {"status": "apply_failed", "reason": e.reason, "detail": e.message}
     except Exception as e:
