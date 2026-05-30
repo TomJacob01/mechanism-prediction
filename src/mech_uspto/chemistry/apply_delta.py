@@ -36,6 +36,98 @@ _BOND_ORDER_TO_TYPE = {
     3: Chem.BondType.TRIPLE,
 }
 
+# Standard neutral valences for heteroatoms we can rescue by raising charge.
+# Excess valence by exactly +1 ⇒ add +1 formal charge (oxonium / iminium /
+# sulfonium / phosphonium). S and P have legitimate hypervalent states
+# (sulfone S=6, phosphate P=5); we only rescue the one-electron-shy case.
+_HETERO_STD_VALENCE = {"O": 2, "N": 3, "S": 2, "P": 3, "C": 4}
+
+
+def _h_overvalence_rescue(rw: Chem.RWMol, original: Chem.Mol, err_msg: str,
+                          max_passes: int = 4) -> bool:
+    """Neutralise an over-valent H atom and retry sanitize.
+
+    Hydride transfer arrows like ``([1, 101], 301)`` form a new H-X bond
+    from a starting ``[H-]`` (hydride, fc=-1, valence 0). RDKit's permitted
+    valence for H- is 0, so the post-surgery H with 1 bond raises
+    "Explicit valence for atom # N H greater than permitted". The arrow's
+    intent is hydride attack: the H becomes neutral after binding. Set
+    fc=0 and retry. Also handles H+ (fc=+1) acquiring a bond on
+    deprotonation reversals.
+    """
+    import re
+    pat = re.compile(r"atom # (\d+) H greater than permitted")
+    msg = err_msg
+    for _ in range(max_passes):
+        m = pat.search(msg)
+        if not m:
+            return False
+        idx = int(m.group(1))
+        if idx >= rw.GetNumAtoms():
+            return False
+        atom = rw.GetAtomWithIdx(idx)
+        if atom.GetAtomicNum() != 1:
+            return False
+        fc = atom.GetFormalCharge()
+        deg = atom.GetDegree()
+        # H with `deg` bonds is only permitted at fc = 1 - deg.
+        # (deg=1 -> fc=0, deg=0 -> fc=+/-1, deg=2 -> fc=-1 which is rare).
+        target_fc = 1 - deg
+        if fc == target_fc:
+            return False
+        atom.SetFormalCharge(target_fc)
+        try:
+            Chem.SanitizeMol(rw)
+            return True
+        except Exception as e:
+            msg = str(e)
+    return False
+
+
+def _hypervalent_rescue(rw: Chem.RWMol, err_msg: str, max_passes: int = 8) -> bool:
+    """Parse a SpecificValenceException, set the offending O/N/S/P's formal
+    charge to absorb the excess valence, retry sanitize. Loops to handle
+    multiple offenders.
+
+    For element X with neutral valence ``std`` and observed valence ``actual``,
+    the permitted valence at charge ``q`` is ``std + q`` (oxonium / ammonium
+    pattern). We set ``q = actual - std`` so the resulting valence is exactly
+    permitted. This covers both "neutral atom needs +1" (oxonium, iminium)
+    and "negative atom needs to neutralize" (e.g. an N⁻ that just gained a
+    bond and should now read as neutral N).
+
+    Returns True if sanitize eventually succeeds, False otherwise.
+    """
+    import re
+    pat = re.compile(r"atom # (\d+) (\w+), (\d+)")
+    msg = err_msg
+    for _ in range(max_passes):
+        m = pat.search(msg)
+        if not m:
+            return False
+        idx = int(m.group(1))
+        elem = m.group(2)
+        actual = int(m.group(3))
+        std = _HETERO_STD_VALENCE.get(elem)
+        if std is None:
+            return False
+        needed_fc = actual - std
+        # Sanity bounds: only rescue charges in [-1, +1]. Anything larger
+        # implies a fundamentally bad arrow, not a chargeable hypervalence.
+        if needed_fc < -1 or needed_fc > 1:
+            return False
+        atom = rw.GetAtomWithIdx(idx)
+        if atom.GetFormalCharge() == needed_fc:
+            # Sanitize asked for this exact charge; can't make progress.
+            return False
+        atom.SetFormalCharge(needed_fc)
+        try:
+            Chem.SanitizeMol(rw)
+            return True
+        except Exception as e:
+            msg = str(e)
+    return False
+
 
 @dataclass
 class ApplyDeltaError(Exception):
@@ -93,6 +185,19 @@ def apply_delta(
         )
 
     rw = Chem.RWMol(mol)
+
+    # Kekulize before any bond surgery so aromatic systems become explicit
+    # single/double bonds with aromatic flags cleared. Without this, mutating
+    # one bond inside an aromatic ring leaves the *other* ring atoms still
+    # flagged aromatic; sanitize then either fails outright or silently
+    # produces a half-aromatic Frankenstein whose SMILES contains `:[CH]:`
+    # placeholders. After surgery, sanitize re-perceives aromaticity cleanly
+    # from the new bond graph. Failure is non-fatal — fall through to the
+    # existing retry ladder if kekulize can't resolve the input.
+    try:
+        Chem.Kekulize(rw, clearAromaticFlags=True)
+    except Exception:
+        pass
 
     # Snapshot the input atom-map set (we assert preservation post-sanitize).
     input_maps = {a.GetIdx(): a.GetAtomMapNum() for a in rw.GetAtoms()}
@@ -204,24 +309,36 @@ def apply_delta(
         Chem.SanitizeMol(rw)
     except Exception as first_err:
         # Retry path for the "aromatic ring composition changed" case:
-        # touched atoms (and their incident bonds) may carry stale aromatic
-        # flags from R's ring system that no longer exists in P. Clearing
-        # them lets sanitize re-perceive aromaticity from the new graph.
-        # We do this only on failure to avoid breaking untouched aromatic
-        # rings that merely share a bond with a touched atom.
-        for idx in touched_atoms:
-            atom = rw.GetAtomWithIdx(idx)
+        # breaking even one bond of an aromatic ring leaves the *other*
+        # ring atoms (which were never touched by Δ) still flagged
+        # aromatic, so RDKit complains "non-ring atom marked aromatic".
+        # Empirically (intermediate verifier on USPTO-31k) clearing only
+        # touched atoms misses these stranded ring-mates, so on first
+        # failure we wipe every aromatic flag and let RDKit re-perceive
+        # from scratch. This is safe — aromaticity is fully derivable
+        # from the bond graph + atom valences, which sanitize already
+        # touches anyway.
+        for atom in rw.GetAtoms():
             atom.SetIsAromatic(False)
         for bond in rw.GetBonds():
-            if (
-                bond.GetBeginAtomIdx() in touched_atoms
-                and bond.GetEndAtomIdx() in touched_atoms
-            ):
-                bond.SetIsAromatic(False)
+            bond.SetIsAromatic(False)
         try:
             Chem.SanitizeMol(rw)
         except Exception as e:
-            raise ApplyDeltaError("sanitize_failed", str(e)) from e
+            # Third retry: hypervalent-heteroatom rescue. The arrow-derived
+            # charge rule misses ~5% of reactions where a lone pair on
+            # O/N/P/S donates into a new bond (oxonium / iminium / sulfonium
+            # / phosphonium). The row-sum heuristic doesn't help either —
+            # for donation the atom *gains* a bond but *loses* electrons, so
+            # Δfc = +1, opposite to what -Σrow predicts. Detect the offending
+            # atom from the SpecificValenceException, set its formal charge
+            # to absorb the excess valence, and retry.
+            if _hypervalent_rescue(rw, str(e)):
+                pass
+            elif _h_overvalence_rescue(rw, mol, str(e)):
+                pass
+            else:
+                raise ApplyDeltaError("sanitize_failed", str(e)) from e
 
     # Stereo handling, post-sanitize. Three cases per atom:
     #   1. Untouched stereocentre → restore the snapshot tag verbatim
