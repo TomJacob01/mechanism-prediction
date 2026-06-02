@@ -113,10 +113,4 @@ Data format and how to obtain it: [docs/DATA.md](docs/DATA.md).
 | [docs/adr/](docs/adr/) | Architecture Decision Records — "why X" |
 | [docs/skills/](docs/skills/) | Step-by-step playbooks (rebuild cache, launch training, debug) |
 | [docs/repo-map.md](docs/repo-map.md) | Auto-generated per-symbol index (regen: `python scripts/gen_repo_map.py`) |
-
----
-
-## Cluster deployment
-
-Training is GPU-agnostic and runs on any single-node CUDA setup.
-SLURM submission workflow + sync setup: [CLUSTER_SETUP.md](CLUSTER_SETUP.md).
+| [CLUSTER_SETUP.md](CLUSTER_SETUP.md) | SLURM submission workflow + sync setup |

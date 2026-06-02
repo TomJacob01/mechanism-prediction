@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -87,8 +88,19 @@ def _replay(rxn_row, step_rows):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", type=Path, default=Path("data/cache/parquet"))
-    ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Replay at most LIMIT reactions. 0 ⇒ all cached rows.",
+    )
     ap.add_argument("--out", type=Path, default=Path("results/cache_rollout.json"))
+    ap.add_argument(
+        "--min-pass-rate",
+        type=float,
+        default=0.95,
+        help="Required round-trip pass-rate. Exit code 1 if below. Set to 0 to disable gating.",
+    )
     args = ap.parse_args()
 
     rxns_tbl = pq.read_table(args.cache / "reactions.parquet")
@@ -163,6 +175,17 @@ def main() -> None:
           f"ok={summary['n_ok']}/{total}  "
           f"mismatches={n_mismatch}  "
           f"-> {args.out}")
+
+    if total == 0:
+        print("[verify_cache_rollout] FAIL: no cached reactions to replay.", file=sys.stderr)
+        sys.exit(2)
+    if args.min_pass_rate > 0 and summary["pass_rate"] < args.min_pass_rate:
+        print(
+            f"[verify_cache_rollout] FAIL: pass_rate {summary['pass_rate']:.4f} "
+            f"< --min-pass-rate {args.min_pass_rate}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":

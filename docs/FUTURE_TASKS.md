@@ -10,10 +10,8 @@ Backlog **not** in the current refactor. Legend: 🔴 blocker · 🟡 important 
 |-----|-----|--------------------------------------------------------|---------|----------------------------------------------------------------------------------------|
 | 1   | 🔴  | Autoregressive rollout (stepwise inference)            | ~1 wk   | new `inference/rollout.py`, `training/metrics.py`                                      |
 | 1.1 | 🔴  | └─ Define deliverable (final-Δ vs path vs product)     | ~30 m   | none — decision doc                                                                    |
-| 1.2 | 🔴  | └─ 10-mechanism RDKit-apply + sanitize spike           | ~2 h    | new `scripts/rollout_spike.py`                                                         |
-| 1.3 | 🔴  | └─ Dataset audit: intermediates? length distribution?  | ~1 h    | `scripts/sanity_check.py` extension                                                    |
-| 1.4 | 🔴  | └─ Exposure-bias check: one-step rollout AUC drop      | ~3 h    | new `scripts/exposure_bias_check.py`                                                   |
-| 1.5 | 🔴  | └─ Implementation (gated on 1.1–1.4)                   | TBD     | new `inference/rollout.py`, `training/metrics.py`                                      |
+| 1.2 | 🔴  | └─ Exposure-bias check: one-step rollout AUC drop      | ~3 h    | new `scripts/exposure_bias_check.py`                                                   |
+| 1.3 | 🔴  | └─ Implementation (gated on 1.1–1.2)                   | TBD     | new `inference/rollout.py`, `training/metrics.py`                                      |
 | 2   | 🟡  | Product-level top-k accuracy (SOTA-comparable)         | ~1 wk   | new `inference/apply_delta.py`, `training/metrics.py`, `scripts/evaluate.py`           |
 | H1  | 🟢  | Biaffine head                                          | ~3 h    | `models/heads.py`, `models/transformer.py`, config                                     |
 | H2  | 🟢  | Two-stage head (detection + classification)            | ~half d | `models/heads.py`, `losses/focal.py`, `engine.py`                                      |
@@ -27,17 +25,14 @@ Backlog **not** in the current refactor. Legend: 🔴 blocker · 🟡 important 
 
 ### #1 Autoregressive rollout
 
-The single hardest task in the backlog — much harder than the encoder. Hardness is concentrated in chemistry (applying predicted Δ to RDKit `Mol` without sanitization failures) and metrics (what counts as "correct" when mechanisms have multiple valid orderings), *not* in the model code itself. Subtasks 1.1–1.4 must complete before 1.5 — they determine ~80% of the design.
+The single hardest task in the backlog — much harder than the encoder. Hardness is concentrated in chemistry (applying predicted Δ to RDKit `Mol` without sanitization failures) and metrics (what counts as "correct" when mechanisms have multiple valid orderings), *not* in the model code itself. Subtasks 1.1–1.2 must complete before 1.3 — they determine ~80% of the design.
 
 - **1.1 Deliverable.** Three candidate questions rollout could answer:
   - **(a) Final-Δ comparison.** Roll out stepwise to convergence; compare cumulative Δ to end-to-end's direct prediction. Only the final pair-wise Δ matters. Matches the README's stepwise-vs-end-to-end FPR claim. *Sidesteps almost every hard chemistry question.* **Default recommendation.**
   - **(b) Path accuracy.** Does predicted step *k* match true step *k*? Mechanistically richer but brutally strict — mechanisms have multiple valid orderings.
   - **(c) Product validity.** Does the final molecule equal the true product? Most permissive; loses mechanistic insight.
-- **1.2 Chemistry spike.** Take 10 mechanisms; manually walk through step-by-step applying *ground-truth* Δ to RDKit (`RWMol` edits → re-perceive valence → `SanitizeMol`). Count how often sanitization fails and on what kinds of steps. Tells you whether rollout is "engineering tedium" or "open research problem" for this dataset. **Prerequisite for #2.**
-- **1.3 Dataset audit.** Confirm whether `mech-USPTO-31k.csv` contains per-step intermediates (separate rows or list-valued columns) vs only start + end. Get the mechanism-length distribution (median, 95th, 99th percentile) — sets `max_steps` for 1.5 and tells us if path-accuracy from 1.1(b) is even feasible.
-- **1.4 Exposure-bias check.** Take the trained stepwise model, run one rollout step on the test set, re-featurize the predicted result, measure PR-AUC on step 2. If it drops a lot, the model needs scheduled sampling / DAgger / teacher-forcing during training — meaning rollout is **not** a post-hoc inference component, it's a training-loop change. Big scope difference.
-- **1.5 Implementation.** Once 1.1–1.4 land: write `predict_full_reaction(model, smiles)` loop (predict Δ → apply to `Mol` → re-featurize → next step, until `argmax(logits)==0` everywhere or `max_steps`). Search strategy (greedy vs beam) depends on 1.1's choice. Other open design points: multi-pair-per-step actions (apply atomically vs one-at-a-time), termination (argmax vs probability threshold), sanitization failure policy (skip / backtrack / force-allow), evaluation cadence (every-epoch vs end-only).
-
+- **1.2 Exposure-bias check.** Take the trained stepwise model, run one rollout step on the test set, re-featurize the predicted result, measure PR-AUC on step 2. If it drops a lot, the model needs scheduled sampling / DAgger / teacher-forcing during training — meaning rollout is **not** a post-hoc inference component, it's a training-loop change. Big scope difference.
+- **1.3 Implementation.** Once 1.1–1.2 land: write `predict_full_reaction(model, smiles)` loop (predict Δ → apply to `Mol` → re-featurize → next step, until `argmax(logits)==0` everywhere or `max_steps`). Search strategy (greedy vs beam) depends on 1.1's choice. Other open design points: multi-pair-per-step actions (apply atomically vs one-at-a-time), termination (argmax vs probability threshold), sanitization failure policy (skip / backtrack / force-allow), evaluation cadence (every-epoch vs end-only).
 ### #2 Product-level top-k accuracy
 
 What mechanism-prediction papers actually headline (Bradshaw 2018 ELECTRO, PMechDB / Tavakoli–Baldi 2024): does any of the top-k *predicted mechanisms*, when applied to the reactants, yield the **correct product molecule** (canonical SMILES match)? This is the right comparison metric — invariant to Δ-matrix symmetries and direct apples-to-apples with the literature.
@@ -45,13 +40,11 @@ What mechanism-prediction papers actually headline (Bradshaw 2018 ELECTRO, PMech
 Pipeline (per val/test sample):
 
 1. **Top-k Δ-matrix enumeration.** Argmax → rank 1. For k > 1: Lawler-style lazy heap over single-pair-swap candidates ordered by Σ log-prob cost.
-2. **Apply Δ to reactants.** New helper `apply_delta(rdkit_mol, delta_matrix) → rdkit_mol_product`: walk the upper-tri non-zero entries, edit bond orders / formal charges on an `RWMol`, then `SanitizeMol`. **Reuses the chemistry spike from #1.2** — same `apply Δ to RDKit Mol` primitive, same sanitization-failure handling.
+2. **Apply Δ to reactants.** Reuses [`apply_delta`](../src/mech_uspto/chemistry/apply_delta.py) (already shipped) — walks the upper-tri non-zero entries, edits bond orders / formal charges on an `RWMol`, then `SanitizeMol`. Full-corpus sanitization-failure rate is already measured by `scripts/verify_apply_delta_e2e.py`.
 3. **Canonicalise + compare.** `Chem.MolToSmiles(prod, canonical=True)` vs ground-truth product SMILES. Hit if equal.
 4. **Aggregate.** `product_top_k = (1/N) Σ 1[hit within top-k]` for k ∈ {1, 5, 10}.
 
 **Cost.** RDKit roundtrip ~1–10 ms/sample; only on val/test, not train. With ~5k val reactions and k=10, adds < 1 min/epoch — negligible.
-
-**Gating.** #1.2 is a prerequisite. If sanitization fails often, the metric is unreliable and #2 blocks on a fix to #1.2's findings.
 
 **Relationship to EM@1.** Once #2 lands, EM@1 (already implemented; see Done §Metrics) becomes a useful internal diagnostic ("how often does the model recover the exact ground-truth matrix?") and `product_top_1` becomes the headline SOTA-comparable number. Keep both.
 
@@ -130,7 +123,5 @@ Three tiers, each subsuming the prior:
 Defer until H1/H2 are settled and there's one config hitting F1 ≥ 0.5 — sweeping a broken model just finds the least-broken broken config. When the time comes: W&B Sweeps or Optuna, search `lr × weight_decay × warmup_steps × focal_gamma` around the best architectural config.
 
 ---
-
-## Completed work
 
 Design decisions and the rationale behind them live in [MODEL.md §7](MODEL.md#7-key-design-decisions-and-their-evidence). Bug-fix history is in `git log`.

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -242,7 +243,12 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--csv", default="data/mech-USPTO-31k.csv")
     ap.add_argument("--out", default="results/apply_delta_e2e.json")
-    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Verify at most LIMIT reactions. 0 or negative ⇒ no limit (full corpus).",
+    )
     ap.add_argument(
         "--offset",
         type=int,
@@ -255,15 +261,27 @@ def main() -> None:
         default=20,
         help="How many mismatch examples to keep per class.",
     )
+    ap.add_argument(
+        "--min-pass-rate",
+        type=float,
+        default=0.80,
+        help="Recoverable pass-rate threshold. Exit code 1 if below. Set to 0 to disable gating.",
+    )
     args = ap.parse_args()
 
     print(f"📖 Parsing {args.csv}")
     reactions = MechUSPTOParser.parse_csv_file(args.csv)
     if args.offset:
         reactions = reactions[args.offset:]
-    if args.limit is not None:
+    if args.limit and args.limit > 0:
         reactions = reactions[: args.limit]
     print(f"   {len(reactions)} reactions loaded")
+    if not reactions:
+        print(
+            "❌ No reactions loaded — check --csv path / --offset / --limit.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     status_counts: Counter[str] = Counter()
     failure_reasons: Counter[str] = Counter()
@@ -405,6 +423,14 @@ def main() -> None:
             f"  ❌ recoverable pass rate {pass_rate_recoverable:.2%} < 80% — "
             "reconsider formulation."
         )
+
+    if args.min_pass_rate > 0 and pass_rate_recoverable < args.min_pass_rate:
+        print(
+            f"[verify_apply_delta_e2e] FAIL: recoverable pass-rate "
+            f"{pass_rate_recoverable:.4f} < --min-pass-rate {args.min_pass_rate}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
