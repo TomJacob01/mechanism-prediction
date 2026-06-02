@@ -98,3 +98,9 @@ def _flatten_per_class(metrics: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
+__all__ = [
+    "make_tracker",
+    "Tracker",
+    "WandbTracker",
+]

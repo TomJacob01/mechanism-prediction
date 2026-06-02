@@ -114,3 +114,11 @@ def process_mapped_smiles(
     edge_index, edge_attr = featurize_edges(aligned_mol)
 
     return aligned_mol, Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+
+__all__ = [
+    "align_atoms",
+    "featurize_edges",
+    "featurize_nodes",
+    "one_hot_encode",
+    "process_mapped_smiles",
+]

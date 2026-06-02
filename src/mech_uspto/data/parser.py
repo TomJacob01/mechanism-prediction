@@ -99,3 +99,7 @@ class MechUSPTOParser:
                     continue
 
         return reactions
+
+__all__ = [
+    "MechUSPTOParser",
+]

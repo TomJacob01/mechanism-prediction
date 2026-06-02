@@ -1,0 +1,37 @@
+# Pre-commit hooks for mech_uspto.
+#
+# Install once per clone:   pre-commit install
+# Run on all files locally: pre-commit run --all-files
+#
+# Hooks here are intentionally lightweight (no slow tests). The point is to
+# catch the cheap class of mistakes (stale repo-map, accidentally committed
+# build artifacts, broken YAML) before they hit `main`.
+
+repos:
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]   # parquet caches / checkpoints should never sneak in
+
+  - repo: local
+    hooks:
+      # Keep docs/repo-map.md in sync with the actual src/ + scripts/ layout.
+      # Regenerate with: python scripts/gen_repo_map.py
+      - id: repo-map-check
+        name: docs/repo-map.md is fresh
+        entry: python scripts/gen_repo_map.py --check
+        language: system
+        # Run when any module that the map indexes changes, OR when the
+        # generator itself changes, OR when the map is touched by hand.
+        files: ^(src/mech_uspto/|scripts/|tests/|docs/repo-map\.md$|scripts/gen_repo_map\.py$)
+        pass_filenames: false

@@ -28,3 +28,8 @@ class MultiStepReaction:
     def __post_init__(self) -> None:
         # Ensure steps are always ordered by step_id.
         self.steps = sorted(self.steps, key=lambda s: s.step_id)
+
+__all__ = [
+    "MultiStepReaction",
+    "ReactionStep",
+]

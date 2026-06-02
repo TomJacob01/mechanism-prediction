@@ -183,3 +183,8 @@ class MechUSPTODataset(Dataset):
 
     def __getitem__(self, idx: int) -> Data:
         return self.data_points[idx]
+
+__all__ = [
+    "MechUSPTODataset",
+    "VALID_TASK_MODES",
+]

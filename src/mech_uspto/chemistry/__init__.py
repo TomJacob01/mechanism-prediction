@@ -5,4 +5,7 @@ from mech_uspto.chemistry.apply_delta import (
     apply_delta,
 )
 
-__all__ = ["apply_delta", "ApplyDeltaError"]
+__all__ = [
+    "apply_delta",
+    "ApplyDeltaError",
+]

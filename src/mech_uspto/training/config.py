@@ -132,3 +132,8 @@ class Config:
 
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         Path(self.checkpoint_dir).mkdir(parents=True, exist_ok=True)
+
+__all__ = [
+    "Config",
+    "DEFAULT_DATA_PATH",
+]

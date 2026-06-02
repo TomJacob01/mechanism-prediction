@@ -99,3 +99,7 @@ class DeltaMLP(nn.Module):
         # Bond formation/breaking is symmetric (i,j) == (j,i).
         logits = (logits + logits.transpose(1, 2)) / 2
         return logits
+
+__all__ = [
+    "DeltaMLP",
+]

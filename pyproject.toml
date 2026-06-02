@@ -42,6 +42,7 @@ dependencies = [
     "torch_geometric",
     "rdkit",
     "matplotlib",
+    "pyarrow",
 ]
 
 [project.optional-dependencies]

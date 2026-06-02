@@ -1,6 +1,6 @@
 # Model & design
 
-End-to-end walkthrough of the `mech_uspto` architecture, training loop, and the rationale behind every non-obvious choice. Companion to [README.md](README.md) (install, quickstart) and [FUTURE_TASKS.md](FUTURE_TASKS.md) (backlog).
+End-to-end walkthrough of the `mech_uspto` architecture, training loop, and the rationale behind every non-obvious choice. Companion to [README.md](../README.md) (install, quickstart) and [FUTURE_TASKS.md](FUTURE_TASKS.md) (backlog).
 
 ---
 

@@ -111,3 +111,7 @@ class ReactionTransformer(nn.Module):
 
         logits = self.mlp(h_dense, edge_dense=edge_dense)
         return logits, mask
+
+__all__ = [
+    "ReactionTransformer",
+]

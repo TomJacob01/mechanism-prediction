@@ -38,3 +38,12 @@ NODE_FEATURE_DIM: int = (
 EDGE_FEATURE_DIM: int = (
     len(ALLOWED_BOND_TYPES) + 1 + 1
 )  # bond-type one-hot + unknown + in_ring  # = 6
+
+__all__ = [
+    "ALLOWED_BOND_TYPES",
+    "ALLOWED_CHIRAL",
+    "ALLOWED_ELEMENTS",
+    "ALLOWED_HYBRIDIZATIONS",
+    "EDGE_FEATURE_DIM",
+    "NODE_FEATURE_DIM",
+]

@@ -282,3 +282,9 @@ def pooled_pr_auc(
         for c in range(num_classes):
             per_class[c] = binary_pr_auc(pooled_probs[:, c], (pooled_ct == c).to(torch.float32))
     return overall, per_class
+
+__all__ = [
+    "binary_pr_auc",
+    "MetricsComputer",
+    "pooled_pr_auc",
+]

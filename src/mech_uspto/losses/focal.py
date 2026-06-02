@@ -81,3 +81,7 @@ class MaskedFocalLossWithSpectators(nn.Module):
             return masked_loss.sum() / num_active
 
         return masked_loss.view_as(targets)
+
+__all__ = [
+    "MaskedFocalLossWithSpectators",
+]

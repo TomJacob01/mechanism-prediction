@@ -162,3 +162,7 @@ class DeltaMatrixGenerator:
                         delta[ii, pi] = 1
 
         return delta
+
+__all__ = [
+    "DeltaMatrixGenerator",
+]

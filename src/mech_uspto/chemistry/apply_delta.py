@@ -396,3 +396,8 @@ def apply_delta(
         )
 
     return rw.GetMol()
+
+__all__ = [
+    "apply_delta",
+    "ApplyDeltaError",
+]

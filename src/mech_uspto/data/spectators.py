@@ -43,3 +43,7 @@ class SpectatorDetector:
     def compute_spectator_ratio(spectator_mask: torch.Tensor) -> float:
         """Fraction of atoms that are spectators (for monitoring)."""
         return (spectator_mask.sum().float() / len(spectator_mask)).item()
+
+__all__ = [
+    "SpectatorDetector",
+]
